@@ -154,6 +154,19 @@ class Store:
         ).fetchone()
         return row["title"] if row else book_id
 
+    def stats(self) -> dict:
+        """Summary of the search index (chunks per book, totals)."""
+        n_chunks = self.conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+        per_book = [
+            dict(r)
+            for r in self.conn.execute(
+                "SELECT book_id, COUNT(*) AS chunks, MAX(seq) AS max_seq"
+                " FROM chunks GROUP BY book_id ORDER BY book_id"
+            )
+        ]
+        books = [dict(r) for r in self.conn.execute("SELECT * FROM books ORDER BY book_id")]
+        return {"chunks": n_chunks, "per_book": per_book, "books": books}
+
     def bm25_search(self, query: str, k: int, book_id: str | None = None) -> list[Hit]:
         terms = list(dict.fromkeys(_tokenize(query)))
         if not terms:

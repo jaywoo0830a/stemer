@@ -122,6 +122,7 @@ SQLite 레지스트리 **`study/registry.db`가 원본**이고, 마크다운 파
 ```bash
 cd study
 python tools/manage.py --help
+python tools/manage.py status    # registry + 인덱스 + 진행 상태 한눈에
 
 # 초기화 (첫 실행 시 기존 TOPICS.md/AGENTS.md를 자동으로 DB에 올림)
 python tools/manage.py init

@@ -7,7 +7,8 @@ mutation re-exports the markdown files automatically.
 
 Examples:
     python tools/manage.py init
-    python tools/manage.py import                     # load markdown -> DB
+    python tools/manage.py status                  # registry + index + progress
+    python tools/manage.py import                  # load markdown -> DB
     python tools/manage.py export                     # write DB -> markdown
     python tools/manage.py books add prob --title "Introduction to Probability" --author "Blitzstein"
     python tools/manage.py books list
@@ -105,6 +106,45 @@ def cmd_docs(args) -> None:
             print(content)
 
 
+def cmd_status(_args) -> None:
+    """Show registry DB + search index + pipeline progress in one view."""
+    from rag.store import Store
+
+    reg_books = registry.list_books()
+    reg_topics = registry.list_topics()
+    counts = {s: sum(1 for t in reg_topics if t.status == s) for s in registry.STATUSES}
+
+    print("=== registry.db (books / topics) ===")
+    print(f"books: {len(reg_books)}")
+    print("topics:", ", ".join(f"{s}={counts[s]}" for s in registry.STATUSES))
+
+    print()
+    print("=== index (rag.db + chroma) ===")
+    idx_path = settings.index_dir / "rag.db"
+    if idx_path.exists():
+        store = Store(idx_path)
+        st = store.stats()
+        print(f"books: {len(st['books'])} | chunks: {st['chunks']}")
+        for row in st["per_book"]:
+            print(f"  {row['book_id']}: {row['chunks']} chunks")
+    else:
+        print("아직 없음 — PDF가 인덱싱되지 않았습니다.")
+
+    try:
+        from rag import embed_index
+
+        print(f"vectors: {embed_index.get_collection().count()}")
+    except Exception:
+        print("vectors: (chromadb 미설치 환경 — 도커 컨테이너에서 확인하세요)")
+
+    inbox = sorted(settings.books_inbox.glob("*.pdf"))
+    notes = sorted(settings.notes_dir.glob("*.md")) if settings.notes_dir.exists() else []
+    print()
+    print("=== 진행 ===")
+    print(f"inbox 대기 PDF: {len(inbox)}" + ("  " + ", ".join(p.name for p in inbox) if inbox else ""))
+    print(f"notes: {len(notes)}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -114,6 +154,7 @@ def main() -> None:
     sub.add_parser("init", help="create schema + import markdown if the DB is empty")
     sub.add_parser("import", help="load TOPICS.md / AGENTS.md / template into the DB (overwrites)")
     sub.add_parser("export", help="rewrite markdown files from the DB")
+    sub.add_parser("status", help="show registry + index + notes state")
 
     pb = sub.add_parser("books", help="manage the book register")
     bsub = pb.add_subparsers(dest="sub", required=True)
@@ -156,6 +197,7 @@ def main() -> None:
         "init": cmd_init,
         "import": cmd_import,
         "export": cmd_export,
+        "status": cmd_status,
         "books": cmd_books,
         "topics": cmd_topics,
         "docs": cmd_docs,
