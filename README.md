@@ -3,6 +3,9 @@
 VPS(8 vCore / 22GB RAM / 200GB SSD, CPU 전용)에서 Qwen3.6-27B를 서빙하고,
 집에서는 SSH 포워딩으로 VS Code 에이전트를 연결해 쓰는 구성입니다.
 
+> 💻 VS Code에서 에이전트로 쓰는 방법(Cline/Roo/Continue 설정)은
+> [VSCODE_AGENT.md](VSCODE_AGENT.md) 참고
+
 ## 구성도
 
 ```mermaid
