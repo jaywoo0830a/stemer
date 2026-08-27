@@ -9,6 +9,7 @@ from pathlib import Path
 
 import httpx
 
+from . import registry
 from .config import settings
 from .store import Hit
 
@@ -70,6 +71,17 @@ def read_or_fallback(path: Path, fallback: str) -> str:
         return fallback
 
 
+def _doc_content(key: str, fallback_path: Path, fallback_text: str) -> str:
+    """Prompt doc from the registry DB, falling back to the file on disk."""
+    try:
+        content = registry.get_doc(key)
+        if content:
+            return content
+    except Exception as exc:  # registry trouble must never block generation
+        log.warning("Registry read failed (%s) — using file fallback.", exc)
+    return read_or_fallback(fallback_path, fallback_text)
+
+
 def build_messages(
     topic: str,
     book_title: str,
@@ -77,8 +89,8 @@ def build_messages(
     section_refs: str,
     hits: list[Hit],
 ) -> list[dict]:
-    agents_md = read_or_fallback(settings.agents_file, _DEFAULT_AGENTS)
-    template_md = read_or_fallback(settings.template_file, _DEFAULT_TEMPLATE)
+    agents_md = _doc_content("agents", settings.agents_file, _DEFAULT_AGENTS)
+    template_md = _doc_content("template", settings.template_file, _DEFAULT_TEMPLATE)
 
     excerpts = "\n\n".join(
         f"### [{h.chapter} | {h.section}] ({h.book_id})\n{h.text}" for h in hits

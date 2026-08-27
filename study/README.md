@@ -27,7 +27,7 @@ bash study/setup.sh
 ## 2. 매일 밤 사용법
 
 1. 교재 PDF를 `study/books/inbox/`에 넣습니다 (SCP/SFTP 등).
-2. `TOPICS.md`에 만들 주제를 `todo` 상태로 적습니다.
+2. `TOPICS.md`에 만들 주제를 `todo` 상태로 적습니다 — 또는 DB로 관리합니다 (아래 §9).
 3. 그냥 잡니다.
 
 watcher가 5분마다 inbox를 확인하고, 순서대로 처리합니다:
@@ -112,3 +112,58 @@ docker compose -f docker/docker-compose.yml run --rm pipeline python tools/pipel
   `python tools/pipeline.py --once --force --index-only` 실행.
 - **인덱스 초기화** → `rm -rf study/index` 후 `--index-only` 재실행
   (markdown 캐시가 있어 재파싱 없이 빠릅니다).
+
+## 9. TOPICS.md / AGENTS.md를 DB로 관리하기
+
+`TOPICS.md`(구조 데이터)와 `AGENTS.md`·`templates/warmup.md`(프롬프트 문서)는
+SQLite 레지스트리 **`study/registry.db`가 원본**이고, 마크다운 파일은 자동으로
+내보내는 스냅샷(git에 커밋됨)입니다.
+
+```bash
+cd study
+python tools/manage.py --help
+
+# 초기화 (첫 실행 시 기존 TOPICS.md/AGENTS.md를 자동으로 DB에 올림)
+python tools/manage.py init
+
+# 교재 등록
+python tools/manage.py books add prob --title "Introduction to Probability" --author "Blitzstein"
+
+# 주제 등록 (자동으로 todo 상태 + TOPICS.md 재생성)
+python tools/manage.py topics add "Normal distribution" --book prob --section 3.5
+
+# 조회 / 상태 변경
+python tools/manage.py topics list --status todo
+python tools/manage.py topics set "Normal distribution" --status done
+
+# 규칙 문서도 DB에서 관리
+python tools/manage.py docs set agents --file AGENTS.md   # 파일 -> DB
+python tools/manage.py docs get agents                    # DB -> 출력
+```
+
+- DB가 비어 있으면 파이프라인·CLI 첫 실행 시 마크다운 파일을 자동으로
+  가져옵니다 (마이그레이션 불필요).
+- 마크다운을 손으로 고쳤다면 `python tools/manage.py import`로 DB에 반영하세요.
+- 상태 변경(생성 완료 포함) 시 `TOPICS.md`가 자동 재생성되어 git diff로
+  진행 상황을 볼 수 있습니다.
+- `registry.db`는 gitignore 대상 — 삭제해도 `import`로 복원됩니다.
+
+## 10. 웹 UI (nginx)
+
+`http://<서버_IP>:8080` — 스타일 없는 순수 HTML UI입니다. nginx(공식 이미지)가
+정적 UI를 서빙하고 `/api/`를 파이프라인 API(FastAPI, `tools/api.py`)로 프록시합니다.
+
+| 구역 | 기능 |
+|---|---|
+| 1. PDF 업로드 | 교재 PDF를 `books/inbox/`로 전송 → watcher가 자동 인덱싱 |
+| 2. 에이전트 지시사항 | `AGENTS.md` 내용을 브라우저에서 편집·저장 (registry DB 반영) |
+| 3. 토픽 설정 | topic/book/section/note 추가 (todo), 상태 전환 버튼 |
+| 4. 상태 | llama-server 상태, 토픽 현황, 최근 로그 (15초 자동 갱신) |
+| 5. 결과물 다운로드 | **생성된 노트 전체를 ZIP으로 다운로드** + 개별 파일 링크 |
+
+- ZIP에는 `notes/*.md`가 담깁니다. 마크다운 뷰어(KaTeX 지원)에서 열어 읽으세요.
+- UI/API에 인증이 없으므로 LAN 내부에서만 쓰는 것을 전제로 합니다
+  (llama-server와 동일한 신뢰 모델).
+- 수정사항 반영은 서버에서 `docker compose -f study/docker/docker-compose.yml up -d --build`
+  (API 의존성이 추가되어 이미지 재빌드 필요).
+- nginx 포트 변경은 `study/web/nginx.conf`의 `listen 8080`을 수정하세요.

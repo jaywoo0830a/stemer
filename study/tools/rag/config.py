@@ -71,6 +71,10 @@ class Settings:
     def template_file(self) -> Path:
         return self.study_root / "templates" / "warmup.md"
 
+    @property
+    def registry_file(self) -> Path:
+        return self.study_root / "registry.db"
+
     # --- chunking ----------------------------------------------------------
     chunk_min_chars: int = field(default_factory=lambda: _env_int("CHUNK_MIN_CHARS", 400))
     chunk_max_chars: int = field(default_factory=lambda: _env_int("CHUNK_MAX_CHARS", 1500))

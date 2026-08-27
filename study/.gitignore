@@ -9,3 +9,7 @@ books/processed/*.pdf
 
 # Local env overrides
 docker/.env
+
+# Local registry DB — markdown exports are the git-tracked copies
+registry.db
+registry.db-*

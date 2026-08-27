@@ -1,26 +1,52 @@
 name: study-rag
 
+# Shared image build + volume mounts for the Python services.
+x-rag-common: &rag-common
+  build:
+    context: .
+  image: study-rag:latest
+  volumes:
+    # The whole study/ folder (books, index, notes, tools, TOPICS.md).
+    - ..:/data
+    # HuggingFace model cache survives rebuilds (embedding + reranker).
+    - hf-cache:/root/.cache/huggingface
+
+x-rag-env: &rag-env
+  STUDY_ROOT: /data
+  LLAMA_BASE_URL: ${LLAMA_BASE_URL:-http://127.0.0.1:8000/v1}
+  LLAMA_API_KEY: ${LLAMA_API_KEY:-}
+  REASONING_EFFORT: ${REASONING_EFFORT:-low}
+  MAX_TOKENS: ${MAX_TOKENS:-4096}
+  WATCH_INTERVAL_S: ${WATCH_INTERVAL_S:-300}
+  OMP_NUM_THREADS: ${OMP_NUM_THREADS:-14}
+
 services:
+  # Overnight worker: indexes inbox PDFs and generates notes for todo topics.
   pipeline:
-    build:
-      context: .
-    image: study-rag:latest
-    # host networking: llama-server listens on the host's 127.0.0.1:8000
-    # and this container serves no ports of its own.
+    <<: *rag-common
+    # host networking: llama-server listens on the host's 127.0.0.1:8000.
+    network_mode: host
+    environment: *rag-env
+    command: ["python", "-u", "tools/pipeline.py", "--watch"]
+    restart: unless-stopped
+
+  # Web API for the UI (upload / agents / topics / status / notes ZIP).
+  api:
+    <<: *rag-common
+    network_mode: host
+    environment: *rag-env
+    command: ["python", "-u", "tools/api.py"]
+    restart: unless-stopped
+
+  # Plain-HTML UI + API reverse proxy, exposed on the host's port 8080.
+  web:
+    image: nginx:alpine
     network_mode: host
     volumes:
-      # The whole study/ folder (books, index, notes, tools, TOPICS.md).
-      - ..:/data
-      # HuggingFace model cache survives rebuilds (embedding + reranker).
-      - hf-cache:/root/.cache/huggingface
-    environment:
-      STUDY_ROOT: /data
-      LLAMA_BASE_URL: ${LLAMA_BASE_URL:-http://127.0.0.1:8000/v1}
-      LLAMA_API_KEY: ${LLAMA_API_KEY:-}
-      REASONING_EFFORT: ${REASONING_EFFORT:-low}
-      MAX_TOKENS: ${MAX_TOKENS:-4096}
-      WATCH_INTERVAL_S: ${WATCH_INTERVAL_S:-300}
-      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-14}
+      - ../web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../web/index.html:/usr/share/nginx/html/index.html:ro
+    depends_on:
+      - api
     restart: unless-stopped
 
 volumes:
