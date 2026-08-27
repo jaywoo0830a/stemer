@@ -9,8 +9,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install CPU-only torch first so downstream packages reuse it.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# Install CPU-only torch + torchvision FIRST, from the CPU wheel index, so
+# downstream packages reuse them. Installing both in one call keeps their
+# versions in sync — mixing PyPI's CUDA-built torchvision with CPU torch
+# breaks with "operator torchvision::nms does not exist".
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
