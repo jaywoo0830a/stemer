@@ -16,18 +16,22 @@ graph LR
     D[Ryzen 7 9700X 16T<br/>AVX-512 · 64GB RAM] -.실행.-> B
 ```
 
-## 조작은 3개 스크립트뿐
+## 조작은 5개 스크립트뿐
 
 | 스크립트 | 역할 | 시점 |
 |---|---|---|
 | `./init.sh` | 의존성 설치 · llama.cpp 빌드(AVX-512) · 모델 다운로드(~29GB) | 최초 1회 |
 | `./up.sh` | 서버 시작 + 헬스체크 + 접속 정보 출력 | 평상시 |
 | `./down.sh` | 서버 종료 | 평상시 |
+| `./worker-up.sh` | RAG 파이프라인(인덱싱·노트생성) + 웹 UI 시작 | 평상시 |
+| `./worker-down.sh` | RAG 파이프라인 + 웹 UI 종료 | 평상시 |
 
 ```bash
-./init.sh   # 1회 (빌드 3~6분 + 다운로드 시간. 중단 후 재실행하면 이어받기)
-./up.sh     # 시작 (첫 로딩 1~2분)
-./down.sh   # 종료
+./init.sh        # 1회 (빌드 3~6분 + 다운로드 시간. 중단 후 재실행하면 이어받기)
+./up.sh          # 시작 (첫 로딩 1~2분)
+./worker-up.sh   # RAG 워커 + 웹 UI 시작 (http://<서버_IP>:8080)
+./worker-down.sh # RAG 워커 + 웹 UI 종료
+./down.sh        # 종료
 ```
 
 - 로그: `logs/llama-server.log`, PID: `llama-server.pid`

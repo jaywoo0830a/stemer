@@ -164,6 +164,11 @@ python tools/manage.py docs get agents                    # DB -> 출력
 - ZIP에는 `notes/*.md`가 담깁니다. 마크다운 뷰어(KaTeX 지원)에서 열어 읽으세요.
 - UI/API에 인증이 없으므로 LAN 내부에서만 쓰는 것을 전제로 합니다
   (llama-server와 동일한 신뢰 모델).
-- 수정사항 반영은 서버에서 `docker compose -f study/docker/docker-compose.yml up -d --build`
-  (API 의존성이 추가되어 이미지 재빌드 필요).
-- nginx 포트 변경은 `study/web/nginx.conf`의 `listen 8080`을 수정하세요.
+- 기동/종료: `../worker-up.sh` / `../worker-down.sh` (이미지 없으면 자동 빌드,
+  `--build`로 강제 재빌드). 코드 수정은 볼륨 마운트라 재빌드 불필요 —
+  `requirements.txt`/`Dockerfile` 변경 시에만 `--build` 필요.
+- 방화벽: LAN에서 UI 접속하려면 8080 개방 필요
+  (`sudo ufw allow 8080/tcp` 또는 `study/docker/.env`에서 `UI_FIREWALL_ENABLE=on` →
+  worker 스크립트가 자동 개방/폐쇄). SSH 터널만 쓴다면 불필요:
+  `ssh -N -L 8080:127.0.0.1:8080 <사용자>@<서버_IP>`
+- nginx 포트 변경은 `study/web/nginx.conf`의 `listen 8080`과 .env의 `UI_PORT`를 함께 수정하세요.
