@@ -57,23 +57,52 @@ curl http://localhost:8000/v1/models
 
 ## 3. 가벼운 채팅+편집: Continue
 
-`~/.continue/config.json`:
+### 설치
 
-```json
-{
-  "models": [
-    {
-      "title": "Qwen3.6-27B (VPS)",
-      "provider": "openai",
-      "model": "Qwen3.6-27B",
-      "apiBase": "http://localhost:8000/v1",
-      "apiKey": "local"
-    }
-  ],
-  "contextLength": 24576,
-  "completionOptions": { "maxTokens": 4096 }
-}
+- VS Code 확장 마켓플레이스에서 `Continue` 설치 후 재로드
+
+### 설정 (최신 버전은 YAML)
+
+최신 Continue는 `config.json` 대신 `~/.continue/config.yaml`을 기본으로 읽습니다.
+Continue 사이드바 → ⚙️(톱니) → **"Open config file"** 을 누르면 실제 사용 중인
+파일이 열리므로, 열린 파일에 아래 내용을 넣으세요:
+
+```yaml
+name: Qwen3.6-27B (VPS)
+version: 1.0.0
+schema: v1
+models:
+  - name: Qwen3.6-27B (VPS)
+    provider: openai
+    model: Qwen3.6-27B
+    apiBase: http://localhost:8000/v1
+    apiKey: local
+    roles:
+      - chat
+      - edit
+      - apply
+    defaultCompletionOptions:
+      maxTokens: 4096
 ```
+
+저장 후 `Ctrl+Shift+P` → `Developer: Reload Window`.
+
+### VS Code에서 쓰기
+
+1. 좌측 사이드바의 **Continue 아이콘** 클릭 → 채팅 패널
+2. 채팅 입력창의 **모델 드롭다운**에서 `Qwen3.6-27B (VPS)` 선택
+3. **모드 드롭다운**에서 선택:
+   - **Agent**: 스스로 파일 탐색·수정·명령 실행까지 하는 에이전트 모드
+   - **Chat**: 일반 질문
+4. 첫 응답까지 1~2분 (CPU라 정상 — 끊지 말 것)
+
+**단축키:**
+
+| 키 | 동작 |
+|---|---|
+| `Ctrl+L` | 코드 선택 후 채팅으로 보내기 |
+| `Ctrl+I` | 선택한 코드 인라인 편집 |
+| `@` 입력 | `@Files`·`@Codebase` 등 컨텍스트 추가 |
 
 ## 4. Remote-SSH로 VPS에 접속하는 경우 (터널 불필요)
 
@@ -99,6 +128,7 @@ VS Code가 Remote-SSH로 VPS에 붙어 있으면 확장이 VPS 내부에서 실�
 | 증상 | 해결 |
 |---|---|
 | `curl`이 안 됨 | 터널 창이 살아있는지, VPS에서 `./up.sh` 했는지 확인 |
+| 모델 목록에 안 보임 | Continue 톱니 → "Open config file"이 `config.yaml`인지 확인 후 저장·재로드 |
 | 401/403 에러 | API Key에 `local` 입력 확인 |
 | 응답이 극단적으로 느림 | VPS에서 `free -h`로 스왑 사용 확인, 불필요한 프로세스 정리 |
 | 터널이 자주 끊김 | `ssh -N -L ... -o ServerAliveInterval=60 -o ServerAliveCountMax=3` 옵션 추가 |
