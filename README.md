@@ -42,10 +42,9 @@ graph LR
 - Qwen3.6 공식 권장 thinking 샘플링: `temp 0.6 / top_p 0.95 / top_k 20`
 - thinking 모드 ON(기본), KV캐시 `q8_0`(f16 대비 품질 차이 미미, 메모리 절반)
 - 퀀트 기본 `Q8_0`(8비트, 원본 품질에 근접) — 64GB RAM 덕에 가능. VPS 시절 Q4_K_M보다 두 단계 위
-- thinking 강도 `high` — 추론을 더 오래 하도록 유도, 난이도 있는 작업의 논리 품질↑
-- MTP 추측 디코딩(`draft-mtp`) 기본 OFF — unsloth Qwen3.6 GGUF에는 MTP 헤드가 없음.
-  헤드가 있는 GGUF라면 `config.env`에서 켜서 품질 손실 없이 생성 속도↑ (아래 섹션 참고)
-- 컨텍스트 기본 64K (64GB RAM 기준 안전). `config.env`의 `CTX_SIZE`로 조절 가능
+- thinking 강도 기본 `medium` — `high`는 엄밀함이 필요한 요청에 per-request로 재정의(아래 참고)
+- 추측 디코딩 기본 `ngram-mod` (모델 불필요, 품질 무손실). `draft-simple`/`draft-mtp`는 선택(아래 섹션)
+- 컨텍스트 기본 32K (학습자료 파일 단위 생성 기준). `config.env`의 `CTX_SIZE`로 조절 가능
 - 속도보다 정확도: 응답 1회에 십수 분~수십 분 걸릴 수 있음이 정상입니다
 
 ## 하드웨어 활용 메모 (9700X · 64GB · NVMe RAID)
@@ -69,26 +68,29 @@ graph LR
 | `Qwen3.6-27B-Q5_K_M.gguf` | ~21GB | 중상 | 2~3 tok/s | Q4보다 품질↑ |
 | `Qwen3.6-27B-Q4_K_M.gguf` | ~17GB | 양호 | 3~4 tok/s | VPS 시절 기본값 |
 
-## MTP 추측 디코딩 (`draft-mtp`)
+## 추측 디코딩 (속도 개선, 품질 무손실)
 
-생성 속도를 품질 손실 없이 올리는 기능입니다. 원리: 모델 내부의 MTP(Multi-Token
-Prediction) 헤드가 다음 토큰을 3개 미리 예측하고, 메인 모델이 한 번의 가중치 통과로
-3개를 동시에 검증합니다. 검증은 메인 모델이 하므로 **출력 품질은 동일**하고,
-CPU처럼 메모리 대역폭에 묶인 환경에서 특히 효과가 큽니다.
+생성 속도를 품질 손실 없이 올리는 기능입니다. 원리: 작은 모델 또는 n-gram이 다음
+토큰들을 미리 예측하고, 메인 모델이 한 번의 가중치 통과로 한꺼번에 검증합니다.
+검증은 메인 모델이 하므로 **출력 품질은 동일**하며, 메모리 대역폭에 묶인 CPU
+환경에서 특히 효과가 큽니다. `config.env`의 `SPEC_TYPE`으로 선택합니다.
 
-> ⚠ **이 프로젝트의 기본 모델은 MTP 미지원입니다.** unsloth의 Qwen3.6 GGUF에는
-> MTP 헤드(`nextn` 텐서)가 없어 `SPEC_TYPE="draft-mtp"`로 시작하면
-> `failed to create MTP context` 오류로 종료됩니다. 기본값은 OFF이며,
-> `init.sh`가 다운로드 후 "MTP 헤드 포함"이라고 알려준 GGUF에서만 켜세요.
+| `SPEC_TYPE` | 설명 | 필요 파일 | 효과 |
+|---|---|---|---|
+| `ngram-mod` (**기본**) | n-gram 해시 풀 — 코드/템플릿/반복 텍스트↑ | 없음 | 1.2~1.5x |
+| `ngram-simple` | n-gram 패턴 매칭 | 없음 | 1.2~1.5x |
+| `draft-simple` | 소형 드래프트 모델 | `DRAFT_MODEL_FILE` (~1.7GB) | 1.5~2.5x |
+| `draft-mtp` | 메인 GGUF의 MTP 헤드 | 메인 모델 내장 | 1.5~2배 |
 
-- **별도 모델 파일 불필요**: MTP 지원 모델은 헤드가 메인 GGUF 파일 안에 포함되어
-  있습니다. `-mtp.gguf` 같은 별도 파일을 받으면 안 됩니다. `init.sh`가 다운로드
-  후 MTP 헤드 포함 여부를 자동으로 알려줍니다.
-- 적용 옵션: `config.env`의 `SPEC_TYPE="draft-mtp"` + `SPEC_DRAFT_N_MAX="3"`.
-- 기대 효과: 수락률 60~80% 시 **1.5~2배** 생성 속도 향상. 코드·반복 패턴에서 수락률이
-  높고, 자유 창작 글에서는 낮아집니다.
-- 메모리 비용: 드래프트 KV 캐시 약 8GB 추가 (총 ~46~50GB, 64GB 내 여유 있음).
-- GGUF에 MTP 헤드가 없는 구형/타 모델이면 시작 시 실패 → `SPEC_TYPE=""` 로 끄면 됩니다.
+- **기본 `ngram-mod`**: 모델 추가 없이 즉시 적용. 수락률은 텍스트 반복성에 따라
+  달라지며, KaTeX 템플릿·문제 나열·코드 블록이 많은 학습자료 생성에 잘 맞습니다.
+- **`draft-simple`**: 같은 토크나이저(Qwen3 계열)의 소형 모델을 드래프트로 사용.
+  `init.sh`가 자동 다운로드하며, 시작 시 토크나이저 불일치로 실패하면 다른
+  Qwen3 계열 드래프트로 바꾸세요.
+- **`draft-mtp`**: 이 프로젝트 기본 unsloth GGUF에는 MTP 헤드(`nextn`)가 없어
+  사용 불가. `init.sh`가 "MTP 헤드 포함"이라고 알려준 GGUF에서만 켜세요.
+- 적용: `SPEC_TYPE` 변경 후 `./down.sh && ./up.sh`. 시작 로그의
+  `draft acceptance rate`로 실제 수락률을 확인할 수 있습니다.
 
 ## 원격 접속
 
@@ -115,46 +117,69 @@ API_KEY="적당히-긴-랜덤-문자열"   # 비워두지 말 것!
 
 - `./down.sh && ./up.sh` 후 `http://<서버_IP>:8000/v1` 로 접속.
 - API Key는 에이전트 설정의 API Key 항목에 동일하게 입력합니다.
-- 공유기에 포트포워딩으로 **외부에 직접 여는 것은 비권장** — SSH 포워딩이 안전합니다.
+- 외부 노출: 공유기 포트포워딩 + 방화벽. `FIREWALL_ENABLE="on"`이면
+  `up.sh`가 ufw 포트를 자동 개방, `down.sh`가 폐쇄합니다.
+- **외부/LAN 노출 시 API_KEY 필수** — 비어 있으면 `up.sh`가 시작을 거부합니다.
 
 ## VS Code 에이전트 연결
 
-### A. Continue (추천)
+상세 가이드는 [VSCODE_AGENT.md](VSCODE_AGENT.md) 참고. 아래 표의 Base URL/API Key만
+접속 방식에 맞게 바꿉니다.
 
-`~/.continue/config.json`:
+| 접속 방식 | Base URL | API Key |
+|---|---|---|
+| SSH 터널 | `http://localhost:8000/v1` | `local` |
+| Remote-SSH (서버 안에서) | `http://127.0.0.1:8000/v1` | `local` |
+| LAN/외부 직접 HTTP | `http://<서버_IP>:8000/v1` | `config.env`의 `API_KEY` 값 |
 
-```json
-{
-  "models": [
-    {
-      "title": "Qwen3.6-27B (Server)",
-      "provider": "openai",
-      "model": "Qwen3.6-27B",
-      "apiBase": "http://localhost:8000/v1",
-      "apiKey": "local"
-    }
-  ],
-  "contextLength": 32768,
-  "completionOptions": { "maxTokens": 4096 }
-}
+### A. Continue (추천, 최신 버전은 YAML)
+
+최신 Continue는 `config.json` 대신 `~/.continue/config.yaml`을 기본으로 읽습니다.
+Continue 사이드바 → ⚙️ → **"Open config file"** 로 실제 사용 중인 파일을 연 뒤
+아래 내용을 넣으세요:
+
+```yaml
+name: Qwen3.6-27B (Server)
+version: 1.0.0
+schema: v1
+models:
+  - name: Qwen3.6-27B (Server)
+    provider: openai
+    model: Qwen3.6-27B
+    apiBase: http://localhost:8000/v1
+    apiKey: local
+    roles:
+      - chat
+      - edit
+      - apply
+    defaultCompletionOptions:
+      maxTokens: 4096
 ```
+
+저장 후 `Ctrl+Shift+P` → `Developer: Reload Window`. 이후 모델 드롭다운에서
+`Qwen3.6-27B (Server)`를 선택하고 **Agent 모드**로 쓰면 됩니다.
+(LAN/외부 접속이면 `apiBase`/`apiKey`를 위 표 값으로 변경)
 
 ### B. Cline / Roo Code
 
-- API Provider: **OpenAI Compatible**
-- Base URL: `http://localhost:8000/v1`
-- API Key: 아무 값(예: `local`)
-- Model ID: `Qwen3.6-27B`
-- 참고: Cline은 시스템 프롬프트가 커서 CPU 환경에서는 턴당 수 분 걸립니다. Continue가 더 가볍습니다.
+| 항목 | 값 |
+|---|---|
+| API Provider | `OpenAI Compatible` |
+| Base URL | 위 표 (기본 `http://localhost:8000/v1`) |
+| API Key | 터널이면 `local`, LAN/외부면 `config.env`의 `API_KEY` |
+| Model ID | `Qwen3.6-27B` |
+
+- Plan 모드로 계획을 먼저 받고 → Act 모드로 실행하는 흐름이 thinking 모델에 잘 맞습니다.
+- Cline은 시스템 프롬프트가 커서 CPU 환경에서는 턴당 수 분 걸립니다. Continue가 더 가볍습니다.
 
 ## 예상 성능 (정직한 기준)
 
 | 항목 | 예상 |
 |---|---|
-| 생성 속도 | Q8_0 ~2 tok/s · Q6_K 2~3 tok/s · Q4_K_M 3~4 tok/s (MTP 수락 시 1.5~2배) |
+| 생성 속도 | Q8_0 ~2 tok/s · Q6_K 2~3 tok/s · Q4_K_M 3~4 tok/s (ngram-mod 기본 적용, draft-simple 시 1.5~2.5배) |
 | 프롬프트 처리 | 200~500 tok/s (AVX-512, 배치 2048) |
-| 응답 1회 | thinking(high) 포함 3~8K 토큰 → **십수 분~수십 분** |
-| 메모리 | Q8_0 29GB + KV 8GB + 런타임 ≈ 38~40GB / 64GB (MTP 켜면 드래프트 KV +8GB) |
+| 응답 1회 | thinking(medium) 포함 3~8K 토큰 → **십수 분~수십 분** |
+| 메모리 | Q8_0 29GB + KV 8GB + 런타임 ≈ 38~40GB / 64GB (draft-simple이면 드래프트 +2GB 내외) |
 
 자동완성(FIM) 용도로는 부적합하고, **챗/작업 위임형 에이전트**에 맞습니다.
 
@@ -165,14 +190,19 @@ API_KEY="적당히-긴-랜덤-문자열"   # 비워두지 말 것!
 | `up.sh` 직후 프로세스 종료 | `logs/llama-server.log` 확인. 메모리 부족 시 `CTX_SIZE`를 32768로 낮추고 `./down.sh && ./up.sh` |
 | 옛 VPS 설정 그대로임 | `config.env`는 이미 있으면 덮어쓰지 않습니다. 새 기본값을 쓰려면 `./down.sh` 후 `config.env` 삭제 → `./init.sh` |
 | 퀀트 변경하고 싶음 | `config.env`의 `MODEL_FILE` 교체 → `./down.sh` → `./init.sh`(새 모델 다운로드) → `./up.sh` |
-| 응답이 너무 오래 걸림 | thinking이 긴 것. `REASONING_EFFORT`를 `medium`으로 낮추고 재시작 |
-| MTP 오류로 시작 실패 | 이 GGUF에 MTP 헤드가 없음(기본 unsloth 모델이 해당). `sed -i 's\|^SPEC_TYPE=.*\|SPEC_TYPE=""\|' config.env && ./up.sh` |
+| 응답이 너무 오래 걸림 | thinking이 긴 것. 엄밀함이 필요 없는 요청은 per-request로 `reasoning_effort`를 낮추거나 `REASONING_EFFORT="low"`로 변경 후 재시작 |
+| `draft-mtp` 오류로 시작 실패 | 이 GGUF에 MTP 헤드가 없음(기본 unsloth 모델). `SPEC_TYPE`를 `ngram-mod`(기본)나 `draft-simple`로 변경 후 `./up.sh` |
+| `draft-simple` 시작 실패 | 드래프트 모델이 메인과 토크나이저 불일치. Qwen3 계열 드래프트로 교체하거나 `SPEC_TYPE="ngram-mod"`로 복귀 |
+| 외부/LAN에서 접속 안 됨 | 서버에서 `./up.sh`로 방화벽 개방 확인, 공유기 포트포워딩, `API_KEY` 일치 여부 확인 |
 | 응답이 매우 느림 | 스왑 사용 중일 가능성 → `free -h` 확인. 불필요한 프로세스 정리 |
 | 다운로드 중단 | `./init.sh` 재실행 → 이어받기 |
-| 집에서 연결 안 됨 | 터널이 살아있는지, `HOST=127.0.0.1` 유지인지 확인 |
-| 서버 재부팅 후 | `./up.sh` 한 번만 다시 실행 |
+| 터널이 자주 끊김 | `ssh -N -L ... -o ServerAliveInterval=60 -o ServerAliveCountMax=3` 추가. 또는 LAN/외부 직접 HTTP로 전환 |
+| 서버 재부팅 후 | `./up.sh` 한 번만 다시 실행 (방화벽도 함께 개방) |
 
 ## 보안
 
 - `HOST=127.0.0.1` 기본값: 외부에서 직접 접근 불가, SSH 터널로만 진입.
-- 0.0.0.0 바인딩은 비추천 (API에 인증이 없음).
+- `HOST=0.0.0.0`(LAN/외부): **API_KEY가 비어 있으면 `up.sh`가 시작을 거부**합니다.
+- 방화벽 개방/폐쇄는 `up.sh`/`down.sh`가 자동 처리 (`FIREWALL_ENABLE="on"`,
+  ufw 기준, sudo 필요 시 안내만 출력). 외부 노출 시 공유기 포트포워딩과
+  **강한 API_KEY 유지**를 권장합니다.

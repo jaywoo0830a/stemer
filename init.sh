@@ -6,6 +6,7 @@
 #   2) RAM 32GB 미만일 때만 스왑 생성 (64GB면 자동 생략)
 #   3) llama.cpp 네이티브 빌드 (Zen5 AVX-512 자동 활성화)
 #   4) GGUF 모델 다운로드 (~29GB, 중단해도 이어받기)
+#      + SPEC_TYPE=draft-simple 이면 드래프트 모델도 다운로드 (~1.7GB)
 #   5) config.env 생성 (있으면 유지)
 # ============================================================
 set -euo pipefail
@@ -110,14 +111,36 @@ if [[ "$SIZE" -lt "$MIN" ]]; then
   die "모델 파일 크기가 비정상: $SIZE bytes (최소 ${MIN})"
 fi
 if grep -aFq 'nextn.' "$MODEL_PATH"; then
-  echo "✅ MTP 헤드 포함 — config.env에서 SPEC_TYPE=\"draft-mtp\" 로 켜면 생성 속도↑"
+  echo "✅ MTP 헤드 포함 — SPEC_TYPE=\"draft-mtp\" 로 켜면 추가 속도↑"
 else
-  echo "⚠ 이 GGUF에는 MTP 헤드가 없음 — SPEC_TYPE=\"\" (기본값) 유지"
+  echo "⚠ 이 GGUF에는 MTP 헤드가 없음 — draft-mtp 는 사용할 수 없습니다 (ngram-mod 등은 정상)"
   if [[ "${SPEC_TYPE:-}" == *mtp* ]]; then
-    echo "   현재 config.env는 SPEC_TYPE=${SPEC_TYPE} → 시작 시 실패합니다. 비워주세요."
+    echo "   현재 SPEC_TYPE=${SPEC_TYPE} → 시작 시 실패합니다. draft-mtp 를 제거 후 재실행."
   fi
 fi
 echo "모델 준비됨: $(numfmt --to=iec "$SIZE")"
+
+# draft-simple(소형 드래프트 모델) 사용 시 드래프트 GGUF 다운로드
+if [[ "${SPEC_TYPE:-}" == *draft-simple* ]]; then
+  if [[ -z "${DRAFT_MODEL_FILE:-}" ]]; then
+    die "SPEC_TYPE에 draft-simple 이 있으나 DRAFT_MODEL_FILE 이 비어 있음 — config.env 확인"
+  fi
+  DRAFT_MODEL_PATH="$MODELS_DIR/$DRAFT_MODEL_FILE"
+  DRAFT_URL="https://huggingface.co/${DRAFT_MODEL_REPO:-unsloth/Qwen3-1.7B-GGUF}/resolve/main/$DRAFT_MODEL_FILE?download=true"
+  if [[ -f "$DRAFT_MODEL_PATH" ]]; then
+    echo "드래프트 모델 존재: $(numfmt --to=iec "$(stat -c%s "$DRAFT_MODEL_PATH")")"
+  else
+    echo "드래프트 모델 다운로드: $DRAFT_URL"
+    curl -L -C - --retry 5 --retry-delay 5 -o "$DRAFT_MODEL_PATH.part" "$DRAFT_URL"
+    mv "$DRAFT_MODEL_PATH.part" "$DRAFT_MODEL_PATH"
+  fi
+  DRAFT_SIZE="$(stat -c%s "$DRAFT_MODEL_PATH")"
+  if [[ "$DRAFT_SIZE" -lt 50000000 ]]; then   # 50MB 미만이면 비정상
+    die "드래프트 모델 크기 비정상: $DRAFT_SIZE bytes"
+  fi
+  echo "드래프트 모델 준비됨: $(numfmt --to=iec "$DRAFT_SIZE")"
+  echo "(토크나이저 불일치 시 llama-server 시작에서 실패 — Qwen3 계열 드래프트 사용)"
+fi
 
 # ---------------------------------------------------------- wrap-up
 log "5/5 마무리"
