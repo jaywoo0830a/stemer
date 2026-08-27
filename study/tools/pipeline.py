@@ -58,10 +58,14 @@ def _slug(pdf_path: Path) -> str:
 
 
 def ingest_pdfs(store: Store, force: bool = False) -> int:
-    """Parse and index every PDF in the inbox, then move it to processed/."""
+    """Parse and index every PDF in the inbox, then move it to processed/.
+
+    Returns the number of successfully indexed books (not just found).
+    """
     pdfs = sorted(settings.books_inbox.glob("*.pdf"))
     if not pdfs:
         return 0
+    indexed = 0
     for pdf in pdfs:
         book_id = _slug(pdf)
         log.info("Ingesting %s (book_id=%s) ...", pdf.name, book_id)
@@ -76,10 +80,11 @@ def ingest_pdfs(store: Store, force: bool = False) -> int:
             store.add_chunks(chunks)
             embed_index.index_book(book_id, chunks)
             shutil.move(str(pdf), str(settings.books_processed / pdf.name))
+            indexed += 1
             log.info("Indexed %s: %d chunks.", book_id, len(chunks))
         except Exception:
             log.exception("Failed to ingest %s — leaving it in inbox.", pdf.name)
-    return len(pdfs)
+    return indexed
 
 
 def llama_healthy() -> bool:

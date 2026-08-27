@@ -16,7 +16,7 @@ from typing import Iterable
 from .chunk import Chunk
 from .config import settings
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_TOKEN_RE = re.compile(r"[a-z0-9\uac00-\ud7a3]+")  # latin + Korean syllables
 
 
 @dataclass
@@ -33,8 +33,15 @@ def _tokenize(text: str) -> list[str]:
     return _TOKEN_RE.findall(text.lower())
 
 
+def _has_hangul(text: str) -> bool:
+    return any("\uac00" <= ch <= "\ud7a3" for ch in text)
+
+
 def _fts_quote(term: str) -> str:
-    return '"' + term.replace('"', '""') + '"'
+    quoted = '"' + term.replace('"', '""') + '"'
+    # Korean words carry particles (정규분포 -> 정규분포의), so prefix-match
+    # Hangul terms; ASCII terms stay exact.
+    return quoted + "*" if _has_hangul(term) else quoted
 
 
 class Store:
@@ -214,6 +221,9 @@ class Store:
             score = 0.0
             for term in terms:
                 tf = doc["tf"].get(term, 0)
+                if tf == 0 and _has_hangul(term):
+                    # same particle problem as FTS5: count prefix matches
+                    tf = sum(cnt for tok, cnt in doc["tf"].items() if tok.startswith(term))
                 if tf:
                     score += idf[term] * tf * (k1 + 1.0) / (tf + norm)
             if score > 0.0:

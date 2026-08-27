@@ -5,8 +5,16 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
 # build-essential: a few wheels still need a C toolchain at install time.
+# libgl1/libglib2.0-0 + libxcb*: required by the opencv build that docling's
+# tableformer imports (missing libxcb.so.1 crashes ingestion in slim images).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        libgl1 libglib2.0-0 \
+        libxcb1 libxcb-icccm4 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 libxcb-xkb1 \
+        libxkbcommon0 libxkbcommon-x11-0 \
+        libxrender1 libsm6 libxext6 libxfixes3 \
+        libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install CPU-only torch + torchvision FIRST, from the CPU wheel index, so
