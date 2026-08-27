@@ -58,12 +58,42 @@ if [[ -n "${LLAMA_EXTRA_ARGS:-}" ]]; then
   ARGS+=("${EXTRA[@]}")
 fi
 
+# MTP(draft-mtp)는 GGUF에 MTP 헤드(nextn 텐서)가 있어야 동작 — 없으면 시작 즉시 종료되므로 미리 검사
+if [[ "${SPEC_TYPE:-}" == *mtp* ]]; then
+  echo "MTP 헤드 확인 중... (GGUF 검사, 수 초 소요)"
+  if ! grep -aFq 'nextn.' "$MODEL_PATH"; then
+    echo "❌ 이 GGUF에는 MTP(Multi-Token Prediction) 헤드가 없어" >&2
+    echo "   --spec-type draft-mtp 로 시작할 수 없습니다." >&2
+    echo "   해결: config.env에서 SPEC_TYPE=\"\" 로 변경 후 다시 실행:" >&2
+    echo "     sed -i 's|^SPEC_TYPE=.*|SPEC_TYPE=\"\"|' config.env && ./up.sh" >&2
+    exit 1
+  fi
+fi
+if [[ "${MLOCK:-}" == "on" ]] && ! ulimit -l unlimited 2>/dev/null; then
+  echo "⚠ RLIMIT_MEMLOCK 상승 실패(비root) → mlock 경고 로그가 나올 수 있음 (실행은 계속됨)"
+fi
+
 echo "llama-server 시작 중... (모델 로딩 1~3분 소요)"
 nohup "$LLAMA_SERVER" "${ARGS[@]}" >"$LOG_FILE" 2>&1 &
 PID=$!
 echo "$PID" > "$PID_FILE"
 
 BASE="http://$HOST:$PORT"
+print_startup_hints() {
+  grep -q "failed to create MTP context" "$LOG_FILE" && {
+    echo >&2
+    echo "💡 원인: 이 GGUF에 MTP(Multi-Token Prediction) 헤드가 없는데" >&2
+    echo "   SPEC_TYPE=\"draft-mtp\" 로 시작을 시도했습니다." >&2
+    echo "   해결: config.env에서 SPEC_TYPE=\"\" 로 변경:" >&2
+    echo "     sed -i 's|^SPEC_TYPE=.*|SPEC_TYPE=\"\"|' config.env && ./up.sh" >&2
+  }
+  grep -q "failed to mlock" "$LOG_FILE" && {
+    echo >&2
+    echo "💡 mlock 경고는 치명적이지 않습니다(가중치 잠금만 미적용, 추론은 정상)." >&2
+    echo "   root로 실행 시: ulimit -l unlimited" >&2
+    echo "   또는 잠금 포기: config.env에서 MLOCK=\"off\"" >&2
+  }
+}
 for _ in $(seq 1 "$HEALTH_TIMEOUT"); do
   if curl -sf "$BASE/health" >/dev/null 2>&1; then
     SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1; exit}')"
@@ -92,6 +122,7 @@ for _ in $(seq 1 "$HEALTH_TIMEOUT"); do
   kill -0 "$PID" 2>/dev/null || {
     echo "❌ 프로세스가 시작 직후 종료됨. 최근 로그:" >&2
     tail -30 "$LOG_FILE" >&2
+    print_startup_hints
     exit 1
   }
   sleep 1
@@ -99,4 +130,5 @@ done
 
 echo "❌ ${HEALTH_TIMEOUT}초 내 헬스체크 실패. 최근 로그:" >&2
 tail -30 "$LOG_FILE" >&2
+print_startup_hints
 exit 1

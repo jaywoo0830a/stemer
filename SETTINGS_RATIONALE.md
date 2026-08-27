@@ -48,7 +48,7 @@ CPU 코어가 아무리 많아도 이 벽은 넘을 수 없습니다.
 | 근거 | 내용 |
 |---|---|
 | 품질 | Q8_0은 8비트 양자화 — 원본(f16) 품질에 근접, Q4_K_M 대비 **두 단계 위** |
-| 메모리 여유 | 29GB + KV 8GB + MTP 드래프트 KV 8GB ≈ 46~50GB < 64GB ✓ |
+| 메모리 여유 | 29GB + KV 8GB ≈ 38~40GB < 64GB ✓ (MTP 켜면 드래프트 KV +8GB) |
 | 프로젝트 방침 | 이 프로젝트는 "속도보다 정확도" (품질 우선) |
 | 트레이드오프 | ~2 tok/s로 Q4_K_M(3~4 tok/s)보다 느림 — 대역폭 공식 ①의 직접 결과 |
 
@@ -135,8 +135,11 @@ $$ \text{KV(64K)} \approx \text{레이어} \times 2 \times \text{KV헤드} \time
 
 ## 5. MTP 추측 디코딩 (`draft-mtp`)
 
-### `SPEC_TYPE="draft-mtp"` + `SPEC_DRAFT_N_MAX="3"`
+### `SPEC_TYPE=""` (기본 OFF) — `draft-mtp`는 MTP 헤드가 있는 GGUF에서만
 
+- **왜 기본 OFF**: unsloth의 Qwen3.6 GGUF에는 MTP 헤드(`nextn` 텐서)가 없어
+  `draft-mtp`로 시작하면 `failed to create MTP context` 오류로 종료됨.
+  `init.sh`가 다운로드 후 "MTP 헤드 포함"이라고 알려준 GGUF에서만 켠다.
 - **원리**: 모델 내부의 MTP(Multi-Token Prediction) 헤드가 다음 토큰 3개를 미리
   예측 → 메인 모델이 **한 번의 가중치 통과로 3개를 동시에 검증**.
 - **품질 손실 없음**: 최종 검증은 메인 모델이 하므로 출력 분포가 동일.
@@ -152,8 +155,9 @@ $$ \text{KV(64K)} \approx \text{레이어} \times 2 \times \text{KV헤드} \time
   `--spec-draft-n-max` 기본값(3). 4 이상은 수락률 하락으로 오히려 손해인 경우가 많음.
 - **메모리 비용**: 드래프트 컨텍스트 KV가 추가됨. 기본 f16 대신 `q8_0` 지정
   (`up.sh`가 `--spec-draft-type-k/v`로 자동 적용) → 64K 기준 약 8GB 절약.
-- **호환성**: GGUF에 MTP 헤드가 없는 구형/타 모델이면 시작 실패 →
-  `SPEC_TYPE=""` (트러블슈팅 표).
+- **호환성**: MTP 헤드는 GGUF에 `nextn` 텐서로 포함되는데, unsloth Qwen3.6 GGUF에는
+  없음 → 이 프로젝트는 기본값 OFF. 헤드 없는 모델에서 켜면
+  `failed to create MTP context` 로 시작 실패 → `SPEC_TYPE=""`.
 
 ---
 
@@ -167,6 +171,8 @@ $$ \text{KV(64K)} \approx \text{레이어} \times 2 \times \text{KV헤드} \time
 - **최신 llama.cpp에서는 `--mlock`이 deprecated** — [server README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)의
   `--load-mode`가 대체. `up.sh`는 `mmap+mlock` 모드로 자동 적용.
 - mlock 실패 시 경고 로그 후 계속 실행되는 것이 일반적 — 문제 시 `off`.
+- 비root로는 RLIMIT_MEMLOCK 상승이 불가해 mlock 경고가 날 수 있음(치명적 아님).
+  root 실행 시 `ulimit -l unlimited`, 또는 `MLOCK="off"` 로 잠금 포기.
 
 ### 스왑 생략 (init.sh, RAM ≥ 32GB일 때)
 
@@ -240,7 +246,7 @@ n=3일 때 검증 1회당 기대 수용 토큰: $\frac{1-a^4}{1-a}$
 | 어려운 설계/리팩토링 | 4,000 | 1,500 | 5,500 | ~46분 | ~23~30분 |
 | 최악(에이전트 멀티턴 누적) | — | — | 10K+ | 1시간 20분+ | — |
 
-### 8.5 메모리 내역 (Q8_0 · 64K · MTP ON)
+### 8.5 메모리 내역 (Q8_0 · 64K · MTP ON 시)
 
 | 구성요소 | 크기 |
 |---|---|
@@ -250,7 +256,7 @@ n=3일 때 검증 1회당 기대 수용 토큰: $\frac{1-a^4}{1-a}$
 | 배치·연산 버퍼 (2048) | ~1~2GB |
 | **합계** | **~46~48GB / 64GB (여유 16GB+)** |
 
-- MTP OFF: 드래프트 KV 8GB 절약 → ~38~40GB.
+- MTP OFF(기본값): 드래프트 KV 8GB 절약 → ~38~40GB.
 - Q4_K_M 전환 시: ~34GB.
 - 64K 풀 컨텍스트에서는 생성 속도가 짧은 대화 대비 약 20~30% 감속 (KV 읽기 추가).
 
@@ -268,7 +274,7 @@ n=3일 때 검증 1회당 기대 수용 토큰: $\frac{1-a^4}{1-a}$
 |---|---|
 | 단순 질문이 많은데 너무 느림 | `REASONING_EFFORT="medium"` |
 | 속도가 최우선 | `MODEL_FILE="...-Q4_K_M.gguf"` |
-| MTP 미지원 모델/오류 | `SPEC_TYPE=""` |
+| MTP 미지원 모델/오류 (기본 모델이 해당) | `SPEC_TYPE=""` |
 | 메모리가 부족해짐 | `CTX_SIZE="32768"` |
 | LAN에서 직접 접속 | `HOST="0.0.0.0"` + `API_KEY` |
 | 더 빠른 긴 컨텍스트 | `LLAMA_EXTRA_ARGS="--flash-attn on"` (기본 auto) |

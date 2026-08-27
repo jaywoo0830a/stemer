@@ -120,7 +120,7 @@ VS Code가 Remote-SSH로 서버에 붙어 있으면 확장이 서버 내부에�
 |---|---|
 | 응답 시작 | 수 분 (thinking high) |
 | 코드 작성 | 턴당 십수 분~수십 분 |
-| 생성 속도 | ~2 tok/s (Q8_0, MTP 수락 시 최대 ~2배) |
+| 생성 속도 | ~2 tok/s (Q8_0, MTP는 기본 OFF — 이 모델 GGUF에 MTP 헤드 없음) |
 
 - thinking이 길어 응답이 늦어도 끊지 말고 기다리세요.
 - 단순 질문 위주로 쓰는데 너무 느리면 서버 `config.env`에서 `REASONING_EFFORT="medium"` → `./down.sh && ./up.sh`.

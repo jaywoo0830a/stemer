@@ -42,7 +42,9 @@ TEMP="0.6"
 TOP_P="0.95"
 TOP_K="20"
 REASONING_EFFORT="high"  # thinking 깊이: minimal/low/medium/high/xhigh/max — 느리면 medium
-SPEC_TYPE="draft-mtp"    # MTP 추측 디코딩(품질 손실 없이 속도↑). GGUF에 MTP 헤드가 있어야 함
+SPEC_TYPE=""             # MTP 추측 디코딩(품질 손실 없이 속도↑). unsloth Qwen3.6 GGUF에는
+                         # MTP 헤드가 없어 기본 OFF — init.sh가 "MTP 헤드 포함"이라 알려주는
+                         # GGUF에서만 draft-mtp 로 켜세요
 SPEC_DRAFT_N_MAX="3"     # 한 번에 예측할 토큰 수 (llama.cpp 기본 3)
 MLOCK="on"               # 모델 RAM 고정(스왑 방지). --load-mode mmap+mlock 사용, 문제 시 off
 MAX_TOKENS="-1"
@@ -129,9 +131,12 @@ if [[ "$SIZE" -lt "$MIN" ]]; then
   die "모델 파일 크기가 비정상: $SIZE bytes (최소 ${MIN})"
 fi
 if grep -aFq 'nextn.' "$MODEL_PATH"; then
-  echo "MTP 헤드 포함 — draft-mtp 추측 디코딩 사용 가능"
+  echo "✅ MTP 헤드 포함 — config.env에서 SPEC_TYPE=\"draft-mtp\" 로 켜면 생성 속도↑"
 else
-  echo "⚠ 이 GGUF에는 MTP 헤드가 없음 → config.env에서 SPEC_TYPE=\"\" 로 비워야 함"
+  echo "⚠ 이 GGUF에는 MTP 헤드가 없음 — SPEC_TYPE=\"\" (기본값) 유지"
+  if [[ "${SPEC_TYPE:-}" == *mtp* ]]; then
+    echo "   현재 config.env는 SPEC_TYPE=${SPEC_TYPE} → 시작 시 실패합니다. 비워주세요."
+  fi
 fi
 echo "모델 준비됨: $(numfmt --to=iec "$SIZE")"
 
