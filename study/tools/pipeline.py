@@ -122,8 +122,13 @@ def generate_pending(store: Store, only_book: str | None = None, max_topics: int
             ids = {h.chunk_id for h in primary}
             hits = primary + [h for h in cross if h.chunk_id not in ids]
             if not hits:
-                log.warning("No retrieved chunks for '%s' — is the book indexed?", row.topic)
-                _failed_topics.add(row.topic)
+                # Book not indexed yet (or wrong book_id) — retry on a later
+                # pass instead of marking the topic as failed.
+                log.warning(
+                    "No retrieved chunks for '%s' (book=%s) — not indexed yet?"
+                    " Will retry on a later pass.",
+                    row.topic, row.book,
+                )
                 continue
             title = store.book_title(row.book) or row.book
             messages = generate.build_messages(row.topic, title, row.book, row.section, hits)
