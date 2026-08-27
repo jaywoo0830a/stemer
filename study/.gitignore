@@ -1,0 +1,11 @@
+# Generated indices and caches (fully rebuildable — keep out of git)
+index/
+.cache/
+logs/
+
+# Uploaded book files (large binaries)
+books/inbox/*.pdf
+books/processed/*.pdf
+
+# Local env overrides
+docker/.env

@@ -1,0 +1,27 @@
+name: study-rag
+
+services:
+  pipeline:
+    build:
+      context: .
+    image: study-rag:latest
+    # host networking: llama-server listens on the host's 127.0.0.1:8000
+    # and this container serves no ports of its own.
+    network_mode: host
+    volumes:
+      # The whole study/ folder (books, index, notes, tools, TOPICS.md).
+      - ..:/data
+      # HuggingFace model cache survives rebuilds (embedding + reranker).
+      - hf-cache:/root/.cache/huggingface
+    environment:
+      STUDY_ROOT: /data
+      LLAMA_BASE_URL: ${LLAMA_BASE_URL:-http://127.0.0.1:8000/v1}
+      LLAMA_API_KEY: ${LLAMA_API_KEY:-}
+      REASONING_EFFORT: ${REASONING_EFFORT:-low}
+      MAX_TOKENS: ${MAX_TOKENS:-4096}
+      WATCH_INTERVAL_S: ${WATCH_INTERVAL_S:-300}
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-14}
+    restart: unless-stopped
+
+volumes:
+  hf-cache:
