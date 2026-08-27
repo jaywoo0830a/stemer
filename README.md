@@ -32,6 +32,9 @@ graph LR
 
 - 로그: `logs/llama-server.log`, PID: `llama-server.pid`
 - 튜닝은 `config.env` 하나만 수정하면 됩니다 (재시작 시 반영).
+- 설정 프리셋은 저장소의 `config.env.example`입니다. `init.sh`가 첫 실행 시
+  이 파일을 `config.env`로 복사하므로 클론 직후 바로 시작할 수 있습니다.
+  (`config.env` 자체는 서버별 값이라 git에 올리지 않습니다.)
 - RAM이 32GB 이상이면 `init.sh`가 스왑 생성을 자동으로 건너뜁니다.
 
 ## 품질 우선 기본값

@@ -2,4 +2,5 @@ deps/
 models/
 logs/
 *.pid
+# 로컬 전용 설정 — 프리셋은 config.env.example (저장소에 포함)
 config.env
