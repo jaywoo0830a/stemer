@@ -150,6 +150,32 @@ n-prefix noise
     check("noise text present", all(w in _text(c) for w in ("single letter noise", "symbol noise", "n-prefix noise")))
 
 
+def test_backmatter_chapters() -> None:
+    print("Back-matter answer/solution sections:")
+    md = """## 3 Applications of Differentiation
+## 3.1 Maximum and Minimum Values
+body text
+## SOLUTION
+a solution block inside the section
+## Answers to Odd-Numbered Exercises
+answer body for chapter 3
+## Solutions to Selected Problems
+full solution text
+## Index
+index body
+"""
+    c = chunk.split_markdown(md, "answers", min_chars=20)
+    chs = {x.chapter for x in c}
+    check("answer key gets own chapter", any("Answers to" in ch for ch in chs))
+    check("solutions get own chapter", any("Solutions to" in ch for ch in chs))
+    check("index gets own chapter", "Index" in chs)
+    check("solution block stays body text", "a solution block inside the section" in _text(c))
+    t = _text(c)
+    check("answer body indexed", "answer body for chapter 3" in t)
+    check("solution text indexed", "full solution text" in t)
+    check("index body indexed", "index body" in t)
+
+
 def test_size_limits() -> None:
     print("Chunk size cap + overlap:")
     long_para = "word " * 400  # ~2000 chars paragraph
@@ -165,6 +191,7 @@ def main() -> None:
     test_number_at_start_and_other_forms()
     test_front_matter_and_in_section_noise()
     test_short_and_symbol_noise()
+    test_backmatter_chapters()
     test_size_limits()
     print(f"== {_PASS} passed, {_FAIL} failed ==")
     sys.exit(1 if _FAIL else 0)

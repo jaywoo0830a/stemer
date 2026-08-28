@@ -49,6 +49,13 @@ _SECTION_START_NOISE_RE = re.compile(
     r"answers?|checkpoint|practice|challenge)\b"
 )
 
+# Back-matter answer/solution sections: keep them as their own retrievable
+# chapters (solutions are grounding material for problem generation).
+_BACKMATTER_RE = re.compile(
+    r"(?i)^\s*(answers?\s+to|solutions?\s+to|solutions?\s+manual|answer\s+key|"
+    r"appendix|index|glossary)\b"
+)
+
 # Docling noise headings that must never split the outline.
 _NOISE_RE = re.compile(
     r"(?i)^\s*("
@@ -155,6 +162,14 @@ def split_markdown(
             level = len(m.group(1))
             title = m.group(2).strip()
 
+            # 0) back-matter answer/solution sections become their own
+            #    retrievable chapter (never noise, never last chapter's tail)
+            if _BACKMATTER_RE.match(title):
+                flush()
+                buf = [line]
+                chapter, section = title, ""
+                continue
+
             # 1) noise headings: keep as body text, never split the outline
             if _NOISE_RE.match(title) or _SECTION_START_NOISE_RE.match(title):
                 buf.append(line)
@@ -227,10 +242,11 @@ def split_markdown(
         raw = raw[first_body:]
 
     # Merge tiny chunks into the following one so retrieval never sees
-    # heading-only fragments.
+    # heading-only fragments. Back-matter chapters (answer keys, index) are
+    # kept as their own chunks even when short — they are meaningful units.
     merged: list[tuple[str, str, str]] = []
     for chap, sec, text in raw:
-        if merged and len(text) < min_chars:
+        if merged and len(text) < min_chars and not _BACKMATTER_RE.match(chap):
             c0, s0, t0 = merged[-1]
             merged[-1] = (c0 or chap, s0 or sec, t0 + "\n\n" + text)
         else:
