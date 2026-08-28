@@ -119,7 +119,10 @@ def generate_pending(store: Store, only_book: str | None = None, max_topics: int
         log.info("Generating note for '%s' (book=%s, section=%s) ...", row.topic, row.book, row.section)
         try:
             refs = [s.strip() for s in re.split(r"[,;]", row.section) if s.strip()]
-            primary = primary_sections(store, row.topic, refs, row.book)
+            # problems kind pulls a larger primary set so the theory section AND
+            # its exercise blocks ("1.5 Exercises") both reach the prompt.
+            primary_limit = 12 if row.kind == "problems" else 8
+            primary = primary_sections(store, row.topic, refs, row.book, limit=primary_limit)
             cross = retrieve(store, row.topic, book_id=row.book)
             ids = {h.chunk_id for h in primary}
             hits = primary + [h for h in cross if h.chunk_id not in ids]
@@ -133,13 +136,27 @@ def generate_pending(store: Store, only_book: str | None = None, max_topics: int
                 )
                 continue
             title = store.book_title(row.book) or row.book
-            messages = generate.build_messages(row.topic, title, row.book, row.section, hits)
-            content = generate.call_llama(messages)
-            out = generate.save_note(
-                row.topic, row.book, row.section, content, out_path=row.note or None
-            )
-            mark_topic(row.topic, "draft")
-            log.info("Saved %s; TOPICS.md status -> draft.", out)
+            if row.kind == "problems":
+                messages = generate.build_problem_messages(row.topic, title, row.book, row.section, hits)
+                problems_text = generate.call_llama(messages)
+                messages = generate.build_solution_messages(
+                    row.topic, title, row.book, row.section, hits, problems_text
+                )
+                solutions_text = generate.call_llama(messages)
+                p_out, s_out = generate.save_problem_set(
+                    row.topic, row.book, row.section, problems_text, solutions_text,
+                    out_base=row.note or None,
+                )
+                mark_topic(row.topic, "draft")
+                log.info("Saved %s and %s; TOPICS.md status -> draft.", p_out, s_out)
+            else:
+                messages = generate.build_messages(row.topic, title, row.book, row.section, hits)
+                content = generate.call_llama(messages)
+                out = generate.save_note(
+                    row.topic, row.book, row.section, content, out_path=row.note or None
+                )
+                mark_topic(row.topic, "draft")
+                log.info("Saved %s; TOPICS.md status -> draft.", out)
             done += 1
         except Exception:
             log.exception("Failed for topic '%s' — continuing with the next one.", row.topic)

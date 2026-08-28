@@ -27,6 +27,11 @@
   Topic: <input type="text" id="topic" required>
   Book: <select id="book"></select>
   Section: <input type="text" id="section" placeholder="3.5 또는 3.5, 3.6">
+  Kind:
+  <select id="kind">
+    <option value="note">note (개념 노트)</option>
+    <option value="problems">problems (기초10 + 중급10 + 풀이)</option>
+  </select>
   Note file: <input type="text" id="note" placeholder="notes/01-normal.md (생략 가능)">
   <button type="submit">추가 (todo)</button>
 </form>
@@ -36,14 +41,17 @@
 <p>llama-server: <span id="llama"></span></p>
 <table border="1">
   <tr>
-    <th>topic</th><th>book</th><th>section</th><th>status</th><th>note</th><th></th>
+    <th>topic</th><th>book</th><th>section</th><th>kind</th><th>status</th><th>note</th><th></th>
   </tr>
   <tbody id="topics"></tbody>
 </table>
 
 <h2>5. 결과물 다운로드</h2>
-<p><a href="/api/notes/download">notes ZIP 다운로드</a></p>
+<p><a href="/api/notes/download">notes + problems ZIP 다운로드</a></p>
+<h3>노트</h3>
 <ul id="notes"></ul>
+<h3>문제 / 풀이</h3>
+<ul id="problems"></ul>
 
 <h2>로그 (최근)</h2>
 <pre id="log"></pre>
@@ -83,7 +91,8 @@ async function refreshStatus() {
       const tr = document.createElement('tr');
       const next = t.status !== 'done' ? 'done' : 'todo';
       tr.innerHTML = '<td>' + esc(t.topic) + '</td><td>' + esc(t.book) + '</td>' +
-        '<td>' + esc(t.section) + '</td><td>' + esc(t.status) + '</td><td>' + esc(t.note) + '</td>';
+        '<td>' + esc(t.section) + '</td><td>' + esc(t.kind) + '</td><td>' + esc(t.status) + '</td>' +
+        '<td>' + esc(t.note) + '</td>';
       const td = document.createElement('td');
       const btn = document.createElement('button');
       btn.textContent = next;
@@ -104,6 +113,14 @@ async function refreshStatus() {
       const li = document.createElement('li');
       li.innerHTML = '<a href="/api/notes/' + encodeURIComponent(n) + '">' + esc(n) + '</a>';
       nl.appendChild(li);
+    }
+
+    const pl = document.getElementById('problems');
+    pl.innerHTML = '';
+    for (const p of s.problems || []) {
+      const li = document.createElement('li');
+      li.innerHTML = '<a href="/api/problems/' + encodeURIComponent(p) + '">' + esc(p) + '</a>';
+      pl.appendChild(li);
     }
 
     document.getElementById('log').textContent = s.log_tail;
@@ -152,6 +169,7 @@ document.getElementById('topicForm').onsubmit = async function (ev) {
       topic: document.getElementById('topic').value,
       book: document.getElementById('book').value,
       section: document.getElementById('section').value,
+      kind: document.getElementById('kind').value,
       note: document.getElementById('note').value,
     });
     document.getElementById('topicMsg').textContent = '추가됨 (todo)';

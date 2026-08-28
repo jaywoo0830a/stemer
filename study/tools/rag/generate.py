@@ -122,6 +122,88 @@ def build_messages(
     ]
 
 
+def _excerpt_block(hits: list[Hit]) -> str:
+    return "\n\n".join(
+        f"### [{h.chapter} | {h.section}] ({h.book_id})\n{h.text}" for h in hits
+    )
+
+
+def build_problem_messages(
+    topic: str,
+    book_title: str,
+    book_id: str,
+    section_refs: str,
+    hits: list[Hit],
+) -> list[dict]:
+    """Prompt for a problem set (no solutions): N basic + N advanced problems."""
+    agents_md = _doc_content("agents", settings.agents_file, _DEFAULT_AGENTS)
+    n_basic = settings.problems_basic
+    n_adv = settings.problems_advanced
+    system = (
+        "You are an expert writer of textbook practice problems. Follow the AGENTS"
+        " rules below EXACTLY (language, KaTeX, textbook-first, no deep proofs).\n\n"
+        "<AGENTS>\n" + agents_md + "\n</AGENTS>\n\n"
+        "Output ONLY the problem set as Markdown. No solutions, no commentary."
+    )
+    user = (
+        f"Write a practice problem set for this topic.\n\n"
+        f"Topic: {topic}\n"
+        f"Book: {book_title} (book_id: {book_id})\n"
+        f"Primary textbook sections: {section_refs or '(not specified)'}\n\n"
+        f"Requirements:\n"
+        f"- EXACTLY {n_basic} BASIC problems: single-step, directly test the"
+        f" definitions and methods in the excerpts.\n"
+        f"- EXACTLY {n_adv} INTERMEDIATE/ADVANCED problems: multi-step, combine"
+        f" ideas from the excerpts; no theory beyond the excerpts.\n"
+        f"- Number them 1..{n_basic} under the heading '## Basic Problems' and"
+        f" 1..{n_adv} under '## Intermediate / Advanced Problems'.\n"
+        f"- Use ONLY notation and methods from the excerpts. Every problem must be"
+        f" solvable with the mapped sections.\n"
+        f"- Do NOT include solutions. Do NOT include answers.\n\n"
+        f"<EXCERPTS>\n{_excerpt_block(hits) or '(no excerpts available)'}\n</EXCERPTS>\n\n"
+        f"Write the problem set now."
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
+def build_solution_messages(
+    topic: str,
+    book_title: str,
+    book_id: str,
+    section_refs: str,
+    hits: list[Hit],
+    problems_text: str,
+) -> list[dict]:
+    """Prompt for full step-by-step solutions to a generated problem set."""
+    agents_md = _doc_content("agents", settings.agents_file, _DEFAULT_AGENTS)
+    system = (
+        "You are an expert writer of textbook solutions. Follow the AGENTS rules"
+        " below EXACTLY (language, KaTeX, textbook-first).\n\n"
+        "<AGENTS>\n" + agents_md + "\n</AGENTS>\n\n"
+        "Output ONLY the solutions as Markdown."
+    )
+    user = (
+        f"Below is a practice problem set for the topic '{topic}'"
+        f" (book: {book_title}, sections: {section_refs or '(not specified)'}).\n\n"
+        f"Write a COMPLETE step-by-step solution for EVERY problem, numbered to"
+        f" match the problem set, under the headings '## Solutions to Basic Problems'"
+        f" and '## Solutions to Intermediate / Advanced Problems'.\n"
+        f"Use the methods and notation from the excerpts — do not introduce"
+        f" techniques that are not in them. End each solution with the final answer"
+        f" boxed in plain text as: Answer: ...\n\n"
+        f"<PROBLEMS>\n{problems_text}\n</PROBLEMS>\n\n"
+        f"<EXCERPTS>\n{_excerpt_block(hits) or '(no excerpts available)'}\n</EXCERPTS>\n\n"
+        f"Write the solutions now."
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
 def call_llama(messages: list[dict]) -> str:
     url = settings.llama_base_url.rstrip("/") + "/chat/completions"
     headers: dict[str, str] = {}
@@ -184,3 +266,36 @@ def save_note(
         if problems:
             log.warning("KaTeX lint issues in %s: %s", path.name, "; ".join(problems))
     return path
+
+
+def save_problem_set(
+    topic: str,
+    book_id: str,
+    section_refs: str,
+    problems_text: str,
+    solutions_text: str,
+    out_base: str | None = None,
+) -> tuple[Path, Path]:
+    """Save a problem set as TWO files: <base>-problems.md and <base>-solutions.md."""
+    slug = slugify(topic)
+    base = Path(out_base).with_suffix("") if out_base else (settings.problems_dir / slug)
+    if not base.is_absolute():
+        base = settings.study_root / base
+    base.parent.mkdir(parents=True, exist_ok=True)
+
+    today = dt.date.today().isoformat()
+    frontmatter = (
+        f"---\ntopic: {topic}\nbook: {book_id}\nsections: {section_refs}\n"
+        f"status: draft\ngenerated: {today}\n---\n\n"
+    )
+    problems_path = base.parent / f"{base.name}-problems.md"
+    solutions_path = base.parent / f"{base.name}-solutions.md"
+    problems_path.write_text(frontmatter + problems_text.strip() + "\n", encoding="utf-8")
+    solutions_path.write_text(frontmatter + solutions_text.strip() + "\n", encoding="utf-8")
+
+    if settings.katex_lint.lower() != "off":
+        for path, text in ((problems_path, problems_text), (solutions_path, solutions_text)):
+            lint_problems = lint_katex(text)
+            if lint_problems:
+                log.warning("KaTeX lint issues in %s: %s", path.name, "; ".join(lint_problems))
+    return problems_path, solutions_path

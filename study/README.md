@@ -143,6 +143,7 @@ python tools/manage.py books add prob --title "Introduction to Probability" --au
 
 # 주제 등록 (자동으로 todo 상태 + TOPICS.md 재생성)
 python tools/manage.py topics add "Normal distribution" --book prob --section 3.5
+python tools/manage.py topics add "ODE practice" --book prob --section 1.5 --kind problems   # 기초10+중급10 + 풀이 별도
 
 # 조회 / 상태 변경
 python tools/manage.py topics list --status todo

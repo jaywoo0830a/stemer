@@ -41,6 +41,12 @@ class TopicPayload(BaseModel):
     book: str = ""
     section: str = ""
     note: str = ""
+    kind: str = "note"
+
+
+class TopicUpdatePayload(BaseModel):
+    status: str | None = None
+    kind: str | None = None
 
 
 class StatusPayload(BaseModel):
@@ -72,6 +78,8 @@ def health():
 def status():
     notes = sorted(p.name for p in settings.notes_dir.glob("*.md")) \
         if settings.notes_dir.exists() else []
+    problems = sorted(p.name for p in settings.problems_dir.glob("*.md")) \
+        if settings.problems_dir.exists() else []
     return {
         "llama_healthy": _llama_healthy(),
         "books": [
@@ -80,6 +88,7 @@ def status():
         ],
         "topics": [t.__dict__ for t in registry.list_topics()],
         "notes": notes,
+        "problems": problems,
         "log_tail": _log_tail(),
     }
 
@@ -119,16 +128,25 @@ def list_topics():
 @app.post("/api/topics")
 def add_topic(payload: TopicPayload):
     registry.add_topic(
-        payload.topic, book=payload.book, section=payload.section, note=payload.note
+        payload.topic, book=payload.book, section=payload.section,
+        note=payload.note, kind=payload.kind,
     )
-    log.info("Topic added: %s (book=%s, section=%s)", payload.topic, payload.book, payload.section)
+    log.info(
+        "Topic added: %s (book=%s, section=%s, kind=%s)",
+        payload.topic, payload.book, payload.section, payload.kind,
+    )
     return {"saved": True}
 
 
 @app.patch("/api/topics/{topic}")
-def set_topic_status(topic: str, payload: StatusPayload):
-    if not registry.update_topic(topic, status=payload.status):
-        raise HTTPException(status_code=404, detail="topic not found")
+def set_topic(topic: str, payload: TopicUpdatePayload):
+    fields = {}
+    if payload.status is not None:
+        fields["status"] = payload.status
+    if payload.kind is not None:
+        fields["kind"] = payload.kind
+    if not fields or not registry.update_topic(topic, **fields):
+        raise HTTPException(status_code=404, detail="topic not found or nothing to update")
     return {"saved": True}
 
 
@@ -139,15 +157,36 @@ def list_notes():
     return sorted(p.name for p in settings.notes_dir.glob("*.md"))
 
 
+@app.get("/api/problems")
+def list_problems():
+    if not settings.problems_dir.exists():
+        return []
+    return sorted(p.name for p in settings.problems_dir.glob("*.md"))
+
+
+@app.get("/api/problems/{name}")
+def get_problem_file(name: str):
+    safe = Path(name).name
+    p = settings.problems_dir / safe
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    return Response(p.read_text(encoding="utf-8"), media_type="text/markdown")
+
+
 @app.get("/api/notes/download")
 def download_notes_zip():
-    files = sorted(settings.notes_dir.glob("*.md")) if settings.notes_dir.exists() else []
-    if not files:
+    entries: list[tuple[str, Path]] = []
+    if settings.notes_dir.exists():
+        entries += [(p.name, p) for p in settings.notes_dir.glob("*.md")]
+    if settings.problems_dir.exists():
+        entries += [(f"problems/{p.name}", p) for p in settings.problems_dir.glob("*.md")]
+    if not entries:
         raise HTTPException(status_code=404, detail="no notes generated yet")
+    entries.sort(key=lambda e: e[0])
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for p in files:
-            zf.writestr(p.name, p.read_text(encoding="utf-8"))
+        for arcname, p in entries:
+            zf.writestr(arcname, p.read_text(encoding="utf-8"))
     buf.seek(0)
     return Response(
         content=buf.read(),

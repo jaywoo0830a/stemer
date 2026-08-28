@@ -30,6 +30,8 @@ def main() -> None:
     ap.add_argument("--effort", default=None, help="override REASONING_EFFORT (low/medium/high)")
     ap.add_argument("--out", default=None, help="output path relative to study/")
     ap.add_argument("--crossref", type=int, default=None, help="number of cross-reference chunks")
+    ap.add_argument("--problems", action="store_true",
+                    help="generate a 10+10 problem set with a separate solutions file")
     ap.add_argument("--update-topics", action="store_true", help="set the row status to draft")
     args = ap.parse_args()
 
@@ -56,6 +58,23 @@ def main() -> None:
         sys.exit(1)
 
     title = store.book_title(book) if book else "(all books)"
+    if args.problems:
+        messages = generate.build_problem_messages(args.topic, title, book or "-", section, hits)
+        print(f"Retrieved {len(hits)} chunks. Generating problem set (call 1/2: problems) ...")
+        problems_text = generate.call_llama(messages)
+        messages = generate.build_solution_messages(
+            args.topic, title, book or "-", section, hits, problems_text
+        )
+        print("Generating solutions (call 2/2) ...")
+        solutions_text = generate.call_llama(messages)
+        p_out, s_out = generate.save_problem_set(
+            args.topic, book or "-", section, problems_text, solutions_text, out_base=out
+        )
+        if args.update_topics and row:
+            mark_topic(args.topic, "draft")
+        print(f"Saved: {p_out}\nSaved: {s_out}")
+        return
+
     messages = generate.build_messages(args.topic, title, book or "-", section, hits)
     print(
         f"Retrieved {len(hits)} chunks ({len(primary)} primary + {len(cross)} cross-reference).\n"

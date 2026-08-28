@@ -5,11 +5,12 @@ lines as headings too, which would fragment the real outline. Strategy:
 
 - numbered sections in any common shape open a section:
   "... 1.1" (number at end) / "12.3 Title" (at start) / "Section 3.5 ..." / "3.5"
+  — including numbered exercise/review/quiz blocks ("1.1 Exercises"), which
+  are first-class retrievable units for problem generation
 - numbered chapters ("1 Functions and Models", "CHAPTER 1") open a chapter
 - noise headings (FIGURE/SOLUTION/EXAMPLE/PROOF/DEFINITION/Table/■/learning
   objectives/publisher furniture/single letters/very short titles/...) stay
-  inside the current section as body text; numbered exercise blocks
-  ("1.1 Exercises") are also treated as body text
+  inside the current section as body text
 - chunks before the first numbered section (cover, TOC, preface, diagnostics)
   are dropped from the index
 - chunks smaller than chunk_min_chars are merged into the following one
@@ -42,12 +43,6 @@ _CHAPTER_RE = re.compile(r"^\s*(\d{1,3})\s+[A-Za-z\uac00-\ud7a3]")
 
 # "CHAPTER 1" / "PART 2".
 _CHAPTER_WORD_RE = re.compile(r"^\s*(?:chapter|part)\s+(\d{1,3})\s*$", re.I)
-
-# Numbered exercise-block headings ("1.1 Exercises") are NOT sections.
-_SECTION_START_NOISE_RE = re.compile(
-    r"(?i)^\d{1,3}[.\-]\d{1,3}\s+(exercises?|problems|review|quiz|test|summary|"
-    r"answers?|checkpoint|practice|challenge)\b"
-)
 
 # Back-matter answer/solution sections: keep them as their own retrievable
 # chapters (solutions are grounding material for problem generation).
@@ -171,7 +166,9 @@ def split_markdown(
                 continue
 
             # 1) noise headings: keep as body text, never split the outline
-            if _NOISE_RE.match(title) or _SECTION_START_NOISE_RE.match(title):
+            #    (numbered exercise/review/quiz blocks are NOT noise — they
+            #     become their own sections, e.g. "1.1 Exercises")
+            if _NOISE_RE.match(title):
                 buf.append(line)
                 continue
 

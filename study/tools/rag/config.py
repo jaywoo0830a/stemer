@@ -56,6 +56,10 @@ class Settings:
         return self.study_root / "notes"
 
     @property
+    def problems_dir(self) -> Path:
+        return self.study_root / "problems"
+
+    @property
     def logs_dir(self) -> Path:
         return self.study_root / "logs"
 
@@ -90,6 +94,10 @@ class Settings:
     rerank_pool: int = field(default_factory=lambda: _env_int("RERANK_POOL", 20))
     n_crossref: int = field(default_factory=lambda: _env_int("N_CROSSREF", 3))
 
+    # --- problem sets ----------------------------------------------------------
+    problems_basic: int = field(default_factory=lambda: _env_int("PROBLEMS_BASIC", 10))
+    problems_advanced: int = field(default_factory=lambda: _env_int("PROBLEMS_ADVANCED", 10))
+
     # --- llama-server ---------------------------------------------------------
     llama_base_url: str = _env("LLAMA_BASE_URL", "http://127.0.0.1:8000/v1")
     llama_api_key: str = _env("LLAMA_API_KEY", "")
@@ -106,7 +114,7 @@ class Settings:
 
     def ensure_dirs(self) -> None:
         for p in (self.books_inbox, self.books_processed, self.books_markdown,
-                  self.index_dir, self.notes_dir, self.logs_dir):
+                  self.index_dir, self.notes_dir, self.problems_dir, self.logs_dir):
             p.mkdir(parents=True, exist_ok=True)
 
 

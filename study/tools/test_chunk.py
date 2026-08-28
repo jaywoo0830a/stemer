@@ -55,7 +55,8 @@ section 1.2 body
     check("1.1 section kept", any(s.startswith("1.1") for s in _sections(c)))
     check("1.2 section kept", any(s.startswith("1.2") for s in _sections(c)))
     check("captions stay body text", "caption" in _text(c))
-    check("exercises stay body text", "exercises text" in _text(c))
+    check("exercises get own section", any(s == "1.1 Exercises" for s in _sections(c)))
+    check("exercise text indexed", "exercises text" in _text(c))
 
 
 def test_number_at_start_and_other_forms() -> None:
@@ -85,7 +86,7 @@ bare number body text
     check("12.3 section", any(s.startswith("12.3 The Derivative") for s in secs))
     check("Section 13.1 form", any(s.startswith("13.1 Vector Fields") for s in secs))
     check("bare 13.2 section", any(s.startswith("13.2") for s in secs))
-    check("exercise block is not a section", not any("Exercises" in s for s in secs))
+    check("exercise block gets own section", any(s == "12.3 Exercises" for s in secs))
     check("chapter derived from number", any(cx.chapter == "Chapter 12" for cx in c))
     t = _text(c)
     for frag in ("definition block text", "proof text", "project text",

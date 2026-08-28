@@ -30,10 +30,10 @@ from rag.config import settings
 
 
 def _print_topics(rows) -> None:
-    print(f"{'topic':<32} {'book':<10} {'section':<12} {'status':<8} note")
-    print("-" * 80)
+    print(f"{'topic':<32} {'book':<10} {'section':<12} {'kind':<9} {'status':<8} note")
+    print("-" * 84)
     for r in rows:
-        print(f"{r.topic:<32} {r.book:<10} {r.section:<12} {r.status:<8} {r.note}")
+        print(f"{r.topic:<32} {r.book:<10} {r.section:<12} {r.kind:<9} {r.status:<8} {r.note}")
 
 
 def _print_books(rows) -> None:
@@ -76,18 +76,20 @@ def cmd_books(args) -> None:
 
 def cmd_topics(args) -> None:
     if args.sub == "add":
-        registry.add_topic(args.topic, book=args.book, section=args.section, note=args.note)
-        print(f"Topic '{args.topic}' added as todo (TOPICS.md re-exported).")
+        registry.add_topic(
+            args.topic, book=args.book, section=args.section, note=args.note, kind=args.kind
+        )
+        print(f"Topic '{args.topic}' added as {args.kind}/todo (TOPICS.md re-exported).")
     elif args.sub == "list":
         _print_topics(registry.list_topics(status=args.status, book=args.book))
     elif args.sub == "set":
         fields = {}
-        for key in ("status", "book", "section", "note"):
-            value = getattr(args, key)
+        for key in ("status", "kind", "book", "section", "note"):
+            value = getattr(args, key, None)
             if value is not None:
                 fields[key] = value
         if not fields:
-            print("Nothing to set (use --status / --book / --section / --note).")
+            print("Nothing to set (use --status / --kind / --book / --section / --note).")
             return
         if registry.update_topic(args.topic, **fields):
             print(f"Topic '{args.topic}' updated (TOPICS.md re-exported).")
@@ -281,12 +283,15 @@ def main() -> None:
     ta.add_argument("--book", default="")
     ta.add_argument("--section", default="")
     ta.add_argument("--note", default="")
+    ta.add_argument("--kind", default="note", choices=registry.KINDS,
+                    help="note = concept note, problems = 10+10 problem set with solutions")
     tl = tsub.add_parser("list", help="list topics")
     tl.add_argument("--status", default=None, choices=registry.STATUSES)
     tl.add_argument("--book", default=None)
     ts = tsub.add_parser("set", help="update fields of one topic")
     ts.add_argument("topic")
     ts.add_argument("--status", default=None, choices=registry.STATUSES)
+    ts.add_argument("--kind", default=None, choices=registry.KINDS)
     ts.add_argument("--book", default=None)
     ts.add_argument("--section", default=None)
     ts.add_argument("--note", default=None)

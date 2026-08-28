@@ -118,6 +118,15 @@ def test_registry() -> None:
 
     registry.add_topic("CLT", book="prob", section="3.7")
     check("add_topic -> todo", any(r.topic == "CLT" and r.status == "todo" for r in registry.list_topics()))
+    check("default kind is note", all(r.kind == "note" for r in registry.list_topics()))
+    registry.add_topic("ODE practice", book="prob", section="1.5", kind="problems")
+    check("problems kind stored", any(r.topic == "ODE practice" and r.kind == "problems" for r in registry.list_topics()))
+    try:
+        registry.update_topic("CLT", kind="bogus")
+        bad_kind_ok = False
+    except ValueError:
+        bad_kind_ok = True
+    check("invalid kind rejected", bad_kind_ok)
     registry.update_topic("CLT", status="draft")
     check("update_topic status", any(r.topic == "CLT" and r.status == "draft" for r in registry.list_topics()))
     check("list_topics filter", len(registry.list_topics(status="draft")) == 1)
@@ -139,7 +148,7 @@ def test_registry() -> None:
     registry._ready = False
     rows2 = registry.list_topics()
     check("export->import roundtrip",
-          {r.topic for r in rows2} == {"Normal distribution", "CLT"})
+          {r.topic for r in rows2} == {"Normal distribution", "CLT", "ODE practice"})
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +186,21 @@ def test_generate() -> None:
 
     out = generate.save_note("Normal distribution", "prob", "3.5", "# Note\n\n$$\nx\n$$")
     check("note saved with frontmatter", out.exists() and "status: draft" in out.read_text())
+
+    msgs = generate.build_problem_messages("Separable equations", "공학수학", "공학수학", "1.3", hits)
+    u = msgs[1]["content"]
+    check("problem prompt has counts + headings",
+          "10" in u and "## Basic Problems" in u and "Do NOT include solutions" in u)
+    msgs2 = generate.build_solution_messages(
+        "Separable equations", "공학수학", "공학수학", "1.3", hits, "# Problems\n1. test"
+    )
+    check("solution prompt carries problems", "# Problems" in msgs2[1]["content"])
+    p, s = generate.save_problem_set(
+        "Separable equations", "공학수학", "1.3", "## Basic Problems\n1. x", "## Solutions\n1. sol"
+    )
+    check("problem set saved as two files",
+          p.name.endswith("-problems.md") and s.name.endswith("-solutions.md")
+          and p.exists() and s.exists() and "status: draft" in s.read_text())
 
 
 # ---------------------------------------------------------------------------
@@ -238,13 +262,17 @@ def test_api() -> None:
 
     check("health", client.get("/api/health").json() == {"ok": True})
     st = client.get("/api/status").json()
-    check("status shape", {"books", "topics", "notes", "log_tail", "llama_healthy"} <= set(st))
+    check("status shape",
+          {"books", "topics", "notes", "problems", "log_tail", "llama_healthy"} <= set(st))
 
     check("agents get/set", client.post("/api/agents", json={"content": "X"}).json() == {"saved": True}
           and client.get("/api/agents").json()["content"] == "X")
 
     check("topic add", client.post("/api/topics", json={"topic": "CLT", "book": "prob"}).json() == {"saved": True})
+    check("problems topic add", client.post(
+        "/api/topics", json={"topic": "ODE", "book": "prob", "kind": "problems"}).json() == {"saved": True})
     check("topic patch", client.patch("/api/topics/CLT", json={"status": "draft"}).json() == {"saved": True})
+    check("topic kind patch", client.patch("/api/topics/CLT", json={"kind": "problems"}).json() == {"saved": True})
     check("topic 404", client.patch("/api/topics/nope", json={"status": "done"}).status_code == 404)
 
     check("pdf upload", "saved" in client.post(
@@ -254,11 +282,15 @@ def test_api() -> None:
     check("inbox received", any(settings.books_inbox.glob("book.pdf")))
 
     (settings.notes_dir / "n1.md").write_text("# n1\n$$\nx\n$$", encoding="utf-8")
+    settings.problems_dir.mkdir(exist_ok=True)
+    (settings.problems_dir / "ode-solutions.md").write_text("# sol", encoding="utf-8")
     r = client.get("/api/notes/download")
     check("zip download", r.status_code == 200 and r.headers["content-type"] == "application/zip")
     names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
-    check("zip members", names == ["n1.md"])
+    check("zip members incl. problems/", names == ["n1.md", "problems/ode-solutions.md"])
     check("single note", client.get("/api/notes/n1.md").status_code == 200)
+    check("problems list", client.get("/api/problems").json() == ["ode-solutions.md"])
+    check("problems file", client.get("/api/problems/ode-solutions.md").status_code == 200)
     check("path traversal blocked", client.get("/api/notes/..%2F..%2Fetc%2Fpasswd").status_code == 404)
 
 
