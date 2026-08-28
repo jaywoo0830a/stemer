@@ -19,6 +19,10 @@ x-rag-env: &rag-env
   MAX_TOKENS: ${MAX_TOKENS:-4096}
   WATCH_INTERVAL_S: ${WATCH_INTERVAL_S:-300}
   OMP_NUM_THREADS: ${OMP_NUM_THREADS:-14}
+  VLM_BASE_URL: ${VLM_BASE_URL:-}
+  VLM_API_KEY: ${VLM_API_KEY:-}
+  VLM_MODEL: ${VLM_MODEL:-local}
+  DOCLING_IMAGES_SCALE: ${DOCLING_IMAGES_SCALE:-2.0}
 
 services:
   # Overnight worker: indexes inbox PDFs and generates notes for todo topics.

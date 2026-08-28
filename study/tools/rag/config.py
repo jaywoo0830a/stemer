@@ -48,6 +48,10 @@ class Settings:
         return self.study_root / "books" / "markdown"
 
     @property
+    def figures_dir(self) -> Path:
+        return self.study_root / "books" / "figures"
+
+    @property
     def index_dir(self) -> Path:
         return self.study_root / "index"
 
@@ -97,6 +101,13 @@ class Settings:
     # --- problem sets ----------------------------------------------------------
     problems_basic: int = field(default_factory=lambda: _env_int("PROBLEMS_BASIC", 10))
     problems_advanced: int = field(default_factory=lambda: _env_int("PROBLEMS_ADVANCED", 10))
+
+    # --- figures / VLM -----------------------------------------------------------
+    figures_enabled: str = _env("FIGURES_ENABLED", "on")   # on | off
+    vlm_base_url: str = _env("VLM_BASE_URL", "")            # empty = VLM disabled
+    vlm_api_key: str = _env("VLM_API_KEY", "")
+    vlm_model: str = _env("VLM_MODEL", "local")
+    vlm_timeout_s: int = field(default_factory=lambda: _env_int("VLM_TIMEOUT_S", 600))
 
     # --- llama-server ---------------------------------------------------------
     llama_base_url: str = _env("LLAMA_BASE_URL", "http://127.0.0.1:8000/v1")

@@ -74,6 +74,16 @@ def ingest_pdfs(store: Store, force: bool = False) -> int:
         try:
             md = parse_pdf(pdf, force=force)  # cached markdown in books/markdown/
             chunks = chunking.split_markdown(md, book_id)
+            if settings.figures_enabled.lower() != "off":
+                try:
+                    from rag import figures
+
+                    figures.caption_figures(pdf.stem)  # optional local VLM
+                    attached = figures.attach_descriptions(chunks, pdf.stem)
+                    if attached:
+                        log.info("Attached %d figure description(s) for %s.", attached, book_id)
+                except Exception:
+                    log.exception("Figure enrichment failed for %s", pdf.name)
             if not chunks:
                 log.warning("No chunks produced for %s — skipping.", pdf.name)
                 continue

@@ -185,3 +185,17 @@ python tools/manage.py docs get agents                    # DB -> 출력
   worker 스크립트가 자동 개방/폐쇄). SSH 터널만 쓴다면 불필요:
   `ssh -N -L 8080:127.0.0.1:8080 <사용자>@<서버_IP>`
 - nginx 포트 변경은 `study/web/nginx.conf`의 `listen 8080`과 .env의 `UI_PORT`를 함께 수정하세요.
+
+## 11. 그림·도표 처리 (figure extraction + VLM)
+
+파싱 시 Docling이 그림을 잘라 `books/figures/<book>/fig-*.png` + `figures.json`
+(캡션·페이지)로 저장합니다. `VLM_BASE_URL`이 설정되어 있으면 로컬 멀티모달
+llama-server에 그림 설명을 요청하고, **캡션이 있는 청크에 `Figure description:`으로
+병합**해 텍스트 전용 27B도 그림 내용을 근거로 쓸 수 있게 합니다.
+
+- VLM 없이도 동작: 캡션만으로 인덱싱 (기본).
+- VLM 활성화: `.env`에 `VLM_BASE_URL=http://127.0.0.1:<vlm-port>/v1` 설정 후
+  파이프라인 재시작. (예: qwen2.5-vl-3b GGUF + mmproj를 두 번째 llama-server로)
+- 그림 설명은 그림마다 저장되어 중단돼도 이어서 처리됩니다.
+- 해상도는 `DOCLING_IMAGES_SCALE` (기본 2.0, 72 DPI × 배율).
+- 테스트: `python tools/test_rag.py`의 figures/vlm 그룹 (fakes 기반, 네트워크 불필요).

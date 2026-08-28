@@ -1,11 +1,12 @@
-# Qwen3.6-27B 로컬 LLM 서버 — VS Code 에이전트용
+# Qwen3.6-27B 로컬 LLM 서버 + RAG 스터디 파이프라인
 
 자택/사무실 서버(**Ryzen 7 9700X · 64GB DDR5-5200 On-Die ECC · NVMe 소프트 RAID**)에서
 Qwen3.6-27B를 서빙하고, SSH 포워딩 또는 LAN으로 VS Code 에이전트를 연결해 쓰는 구성입니다.
+교재 PDF → RAG 인덱싱 → 학습 노트/문제 세트 자동 생성 파이프라인(웹 UI 포함)도 담습니다.
 
-> 💻 VS Code에서 에이전트로 쓰는 방법(Cline/Roo/Continue 설정)은
-> [VSCODE_AGENT.md](VSCODE_AGENT.md) 참고
-> 📐 각 설정의 근거(왜 이 값인가)는 [SETTINGS_RATIONALE.md](SETTINGS_RATIONALE.md) 참고
+문서는 딱 두 개입니다:
+- **이 파일**: 서버(모델 서빙) · VS Code 에이전트 연결 · 설정 근거 · 트러블슈팅
+- **[study/README.md](study/README.md)**: RAG 스터디 파이프라인 사용법
 
 ## 구성도
 
@@ -62,6 +63,21 @@ graph LR
 - **NVMe 소프트 RAID**: 모델 로딩이 빨라질 뿐, 추론 중에는 성능 영향이 없습니다.
 - **전력/발열**: CPU 추론은 지속 풀로드입니다. 서버실 통풍·쿨러 상태를 확인하세요.
 - **더 빠른 긴 컨텍스트**: 플래시 어텐션은 최신 버전 기본 `auto`. 효과를 명시하려면 `LLAMA_EXTRA_ARGS="--flash-attn on"` (오류 나면 제거)
+
+## 설정 근거 (요약)
+
+**물리 상한**: 생성 속도 ≈ 실효 대역폭(≈60GB/s) ÷ 모델 크기 → Q8_0(29GB) ≈ 2 tok/s.
+프리필은 연산 지배라 AVX-512(512bit) + 배치 처리가 크게 기여합니다.
+
+- **Q8_0 기본**: 8비트 양자화로 f16에 근접한 품질. 64GB RAM이라 가능.
+- **CTX_SIZE 32K**: 학습자료 파일 단위 생성 기준. KV 캐시 `q8_0`은 f16 대비 품질 차이
+  미미(<0.1%)하고 메모리는 절반.
+- **THREADS 16 · BATCH 2048**: SMT 포함 전 코어 사용 + AVX-512 프리필 효율 극대화.
+- **TEMP 0.6 / TOP_P 0.95 / TOP_K 20**: Qwen3.6 공식 권장 thinking 샘플링 값.
+- **REASONING_EFFORT medium(기본)**: 엄밀함 필요한 요청만 per-request로 `high` 재정의.
+- **MLOCK on**: 모델 가중치 RAM 고정(스왑 방지). 경고가 계속되면 `off`.
+- **보안**: `HOST=0.0.0.0`이면 API_KEY 필수(`up.sh`가 빈 키 거부).
+  `FIREWALL_ENABLE=on`이면 up/down.sh가 ufw 포트 자동 개폐.
 
 ## 퀀트 선택 (`config.env`의 `MODEL_FILE`)
 
@@ -127,8 +143,7 @@ API_KEY="적당히-긴-랜덤-문자열"   # 비워두지 말 것!
 
 ## VS Code 에이전트 연결
 
-상세 가이드는 [VSCODE_AGENT.md](VSCODE_AGENT.md) 참고. 아래 표의 Base URL/API Key만
-접속 방식에 맞게 바꿉니다.
+아래 표의 Base URL/API Key만 접속 방식에 맞게 바꾸면 됩니다.
 
 | 접속 방식 | Base URL | API Key |
 |---|---|---|
@@ -176,6 +191,15 @@ models:
 - Plan 모드로 계획을 먼저 받고 → Act 모드로 실행하는 흐름이 thinking 모델에 잘 맞습니다.
 - Cline은 시스템 프롬프트가 커서 CPU 환경에서는 턴당 수 분 걸립니다. Continue가 더 가볍습니다.
 
+**단축키 (Continue)**: `Ctrl+L` 선택 코드 채팅 전송 · `Ctrl+I` 인라인 편집 · `@` 입력으로 파일/코드베이스 컨텍스트 추가.
+
+**Remote-SSH**: VS Code가 서버에 붙어 있으면 확장이 서버 안에서 실행되므로 터널 없이
+Base URL `http://127.0.0.1:8000/v1`을 그대로 씁니다.
+
+**사용 팁**: 응답 시작까지 수 분은 정상(끊지 말 것). 단순 질문이 많으면 서버
+`config.env`의 `REASONING_EFFORT="medium"` 유지, 대화가 길어지면 새 채팅으로 시작.
+자동완성(FIM) 용도로는 부적합 — 챗/작업 위임형으로 쓰세요.
+
 ## 예상 성능 (정직한 기준)
 
 | 항목 | 예상 |
@@ -198,6 +222,11 @@ models:
 | `draft-mtp` 오류로 시작 실패 | 이 GGUF에 MTP 헤드가 없음(기본 unsloth 모델). `SPEC_TYPE`를 `ngram-mod`(기본)나 `draft-simple`로 변경 후 `./up.sh` |
 | `draft-simple` 시작 실패 | 드래프트 모델이 메인과 토크나이저 불일치. Qwen3 계열 드래프트로 교체하거나 `SPEC_TYPE="ngram-mod"`로 복귀 |
 | 외부/LAN에서 접속 안 됨 | 서버에서 `./up.sh`로 방화벽 개방 확인, 공유기 포트포워딩, `API_KEY` 일치 여부 확인 |
+| `curl`이 안 됨 | 터널 창이 살아있는지, 서버에서 `./up.sh` 했는지 확인 |
+| 모델 목록에 안 보임 | Continue 톱니 → "Open config file"이 `config.yaml`인지 확인 후 저장·재로드 |
+| 401/403 에러 | API Key 확인 (터널 `local`, LAN/외부는 `config.env`의 `API_KEY` 값) |
+| 터널 자주 끊김 | `ssh -N -L ... -o ServerAliveInterval=60 -o ServerAliveCountMax=3` |
+| 서버 재부팅 후 | 서버에서 `./up.sh` → `./worker-up.sh` 실행 |
 | 응답이 매우 느림 | 스왑 사용 중일 가능성 → `free -h` 확인. 불필요한 프로세스 정리 |
 | 다운로드 중단 | `./init.sh` 재실행 → 이어받기 |
 | 터널이 자주 끊김 | `ssh -N -L ... -o ServerAliveInterval=60 -o ServerAliveCountMax=3` 추가. 또는 LAN/외부 직접 HTTP로 전환 |

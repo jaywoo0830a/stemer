@@ -294,6 +294,82 @@ def test_api() -> None:
     check("path traversal blocked", client.get("/api/notes/..%2F..%2Fetc%2Fpasswd").status_code == 404)
 
 
+# ---------------------------------------------------------------------------
+# figures + vlm (figure extraction and description attachment)
+# ---------------------------------------------------------------------------
+def test_figures() -> None:
+    print("figures + vlm — extract, caption, attach descriptions:")
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        skip("figures", f"pillow missing: {exc}")
+        return
+    from rag import figures, vlm
+
+    root = fresh_env()
+
+    # --- duck-typed DoclingDocument-like fakes (no docling dependency) ---
+    class _Prov:
+        page_no = 1
+
+    class _FakePic:
+        def __init__(self, img, caption):
+            self._img, self._cap = img, caption
+            self.prov = [_Prov()]
+
+        def caption_text(self, doc):
+            return self._cap
+
+        def get_image(self, doc):
+            return self._img
+
+    class _Page:
+        image = object()
+
+    class _FakeDoc:
+        def __init__(self, pics):
+            self.pictures = pics
+            self.pages = {1: _Page()}
+
+    doc = _FakeDoc([
+        _FakePic(Image.new("RGB", (24, 16), "red"), "FIGURE 1.2 The tangent line"),
+        _FakePic(Image.new("RGB", (24, 16), "blue"), "FIGURE 1.3 The area problem"),
+    ])
+    n = figures.extract_figures(doc, "calc")
+    check("figures extracted", n == 2)
+    check("metadata written", figures.metadata_path("calc").exists())
+    check("pngs written", len(list(figures.figures_dir_for("calc").glob("*.png"))) == 2)
+    check("cache hit on second run", figures.extract_figures(doc, "calc") == 2)
+
+    # --- vlm messages + description loop (no network) ---
+    msgs = vlm.build_messages(b"fakebytes", "FIGURE 1.2 The tangent line")
+    check("data-uri image in messages",
+          "data:image/png;base64," in str(msgs[0]["content"]) and "tangent" in str(msgs[0]["content"]))
+
+    settings.vlm_base_url = "http://127.0.0.1:9999/v1"  # enabled
+    vlm.describe_image = lambda path, caption="": f"desc of {path.name}"  # fake
+    done = figures.caption_figures("calc")
+    check("captions generated", done == 2)
+    descs = figures.load_descriptions("calc")
+    check("descriptions persisted", len(descs) == 2)
+
+    # --- attach to chunks ---
+    class _Chunk:
+        def __init__(self, text):
+            self.text = text
+
+    chunks = [
+        _Chunk("intro text"),
+        _Chunk("FIGURE 1.2 The tangent line is shown below."),
+        _Chunk("FIGURE 1.3 The area problem appears in section 1.3."),
+    ]
+    attached = figures.attach_descriptions(chunks, "calc")
+    check("descriptions attached", attached == 2)
+    check("description injected at caption chunk",
+          "Figure description: desc of fig-00001.png" in chunks[1].text)
+    check("unrelated chunk untouched", "Figure description" not in chunks[0].text)
+
+
 def main() -> None:
     print("== RAG core tests ==")
     test_store()
@@ -301,6 +377,7 @@ def main() -> None:
     test_generate()
     test_retrieve()
     test_api()
+    test_figures()
     print(f"== {_PASS} passed, {_FAIL} failed, {len(_SKIPS)} skipped ==")
     for s in _SKIPS:
         print(f"  skipped: {s}")
