@@ -198,4 +198,23 @@ llama-server에 그림 설명을 요청하고, **캡션이 있는 청크에 `Fig
   파이프라인 재시작. (예: qwen2.5-vl-3b GGUF + mmproj를 두 번째 llama-server로)
 - 그림 설명은 그림마다 저장되어 중단돼도 이어서 처리됩니다.
 - 해상도는 `DOCLING_IMAGES_SCALE` (기본 2.0, 72 DPI × 배율).
+
+## 12. 수식 LaTeX 변환 + OCR (docling 2.123.1)
+
+docling을 최신(2.123.1)으로 고정하고 **수식 인식(LaTeX 변환)**과 **OCR**을 기본으로 켭니다.
+
+- **수식**: `do_formula_enrichment`로 디스플레이 수식을 LaTeX로 변환합니다.
+  기본 모델은 로컬 VLM `CodeFormulaV2`(`codeformulav2` 프리셋) — 첫 파싱 때
+  모델을 다운로드합니다 (HF 캐시 볼륨에 저장, 재빌드에도 유지).
+  더 가벼운 대안: `DOCLING_FORMULA_PRESET=granite_docling`.
+- **OCR**: 텍스트 레이어의 깨진 수식 글리프(예: `f s 2 x d`)를 복구합니다.
+  `DOCLING_OCR_MODE=default`(PDF 인지 레이아웃 영역, 빠름) /
+  `full_page`(전체 페이지 OCR, 인라인 수식까지 최대 복구, 느림).
+  언어는 `DOCLING_OCR_LANG=en` (PP-OCRv6 코드).
+- **헤딩 구조**: `DOCLING_HEADING_HIERARCHY=on`이면 PDF 북마크/번호/폰트로
+  `#`/`##`/`###` 계층을 추론해 마크다운을 계층적으로 만듭니다. 청킹은
+  내용 기반이라 영향 없습니다.
+- 수식 모델 + OCR 때문에 파싱이 이전보다 느립니다 (1200쪽 교재 기준 수 시간
+  예상 — 밤새 워커 전제). `requirements.txt`가 바뀌었으므로 이미지 재빌드 필요
+  (`worker-up.sh --build`).
 - 테스트: `python tools/test_rag.py`의 figures/vlm 그룹 (fakes 기반, 네트워크 불필요).

@@ -22,11 +22,44 @@ def get_converter():
         import os
 
         from docling.datamodel.base_models import InputFormat
-        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.datamodel.pipeline_options import (
+            CodeFormulaVlmOptions,
+            OcrMode,
+            PdfPipelineOptions,
+            RapidOcrOptions,
+        )
         from docling.document_converter import DocumentConverter, PdfFormatOption
 
-        log.info("Initializing Docling (first call downloads layout models) ...")
+        log.info("Initializing Docling (first call downloads layout + formula models) ...")
         opts = PdfPipelineOptions()
+
+        # Formula enrichment: decode display equations to LaTeX. The default
+        # "codeformulav2" preset is a local VLM specialised for code/formulas;
+        # "granite_docling" (258M) is a lighter alternative. The model is
+        # downloaded on first use into the HF cache (volume-mounted).
+        opts.do_formula_enrichment = True
+        preset = os.environ.get("DOCLING_FORMULA_PRESET", "codeformulav2").strip().lower()
+        opts.code_formula_options = CodeFormulaVlmOptions.from_preset(preset)
+
+        # OCR: RapidOCR replaces/supplements the programmatic text layer. Many
+        # textbook PDFs embed math with a broken glyph encoding ("f s 2 x d"
+        # instead of f(2x)) — OCR recovers it. default = PDF-aware layout
+        # regions (fast); full_page = force OCR over the whole page (slower,
+        # best recovery for inline math).
+        opts.do_ocr = True
+        ocr_mode = os.environ.get("DOCLING_OCR_MODE", "default").strip().lower()
+        opts.ocr_options = RapidOcrOptions(
+            lang=[os.environ.get("DOCLING_OCR_LANG", "en").strip()],
+            mode=OcrMode.FULL_PAGE if ocr_mode == "full_page" else OcrMode.DEFAULT,
+        )
+
+        # Heading level inference (PDF bookmarks/numbering/font style) so the
+        # exported markdown gets proper #/##/### nesting instead of flat ##.
+        # Chunking is content-based and unaffected by heading levels.
+        if os.environ.get("DOCLING_HEADING_HIERARCHY", "on").strip().lower() != "off":
+            opts.heading_hierarchy_options.enabled = True
+            opts.generate_parsed_pages = True  # needed for style-based inference
+
         # Keep page/element rasters so figures can be cropped & saved
         # (official export_figures.py pattern).
         opts.generate_page_images = True

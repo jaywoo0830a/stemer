@@ -23,6 +23,10 @@ x-rag-env: &rag-env
   VLM_API_KEY: ${VLM_API_KEY:-}
   VLM_MODEL: ${VLM_MODEL:-local}
   DOCLING_IMAGES_SCALE: ${DOCLING_IMAGES_SCALE:-2.0}
+  DOCLING_FORMULA_PRESET: ${DOCLING_FORMULA_PRESET:-codeformulav2}
+  DOCLING_OCR_MODE: ${DOCLING_OCR_MODE:-default}
+  DOCLING_OCR_LANG: ${DOCLING_OCR_LANG:-en}
+  DOCLING_HEADING_HIERARCHY: ${DOCLING_HEADING_HIERARCHY:-on}
 
 services:
   # Overnight worker: indexes inbox PDFs and generates notes for todo topics.

@@ -1,4 +1,8 @@
-docling>=2.10
+# docling 2.123.1 (pinned, 2026-08): the `vlm` extra pulls the inline-VLM deps
+# (transformers/accelerate/peft/qwen-vl-utils) required by the CodeFormulaV2
+# formula-enrichment model. The standard extra ships the new `rapidocr`
+# package for OCR — the legacy rapidocr-onnxruntime package is obsolete.
+docling[vlm]==2.123.1
 chromadb>=0.5.5
 sentence-transformers>=3.0.0
 httpx>=0.27.0
@@ -6,4 +10,3 @@ tqdm>=4.66.0
 fastapi>=0.110
 uvicorn>=0.29
 python-multipart>=0.0.9
-rapidocr-onnxruntime>=1.3.24
