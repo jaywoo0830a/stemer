@@ -50,11 +50,26 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
     return [vec.tolist() for vec in out]
 
 
-def index_book(book_id: str, chunks: list[Chunk]) -> None:
-    """Replace all vectors of one book with fresh embeddings."""
+# chromadb rejects a single add() larger than its max batch size (5461 in
+# 0.5.x) — stay safely below it.
+CHROMA_ADD_BATCH = 5000
+
+
+def index_book(book_id: str, chunks: list[Chunk], force: bool = False) -> None:
+    """Replace all vectors of one book with fresh embeddings.
+
+    Guard: if vectors already exist and force is False, skip embedding —
+    retries after a crash must not redo the expensive embedding pass.
+    """
     if not chunks:
         return
     col = get_collection()
+
+    existing = col.get(where={"book_id": book_id}, limit=1)
+    if not force and existing and existing.get("ids"):
+        log.info("Vectors already present for %s — skipping embedding.", book_id)
+        return
+
     try:
         col.delete(where={"book_id": book_id})
     except Exception as exc:  # noqa: BLE001 — delete-by-where may fail on old chroma
@@ -69,7 +84,15 @@ def index_book(book_id: str, chunks: list[Chunk]) -> None:
     for i in tqdm(range(0, len(texts), settings.embed_batch), desc="embed"):
         embeddings.extend(_embed_batch(texts[i : i + settings.embed_batch]))
 
-    col.add(ids=ids, embeddings=embeddings, documents=texts, metadatas=metas)
+    # chromadb rejects huge add() calls — split into capped batches.
+    for start in range(0, len(ids), CHROMA_ADD_BATCH):
+        end = start + CHROMA_ADD_BATCH
+        col.add(
+            ids=ids[start:end],
+            embeddings=embeddings[start:end],
+            documents=texts[start:end],
+            metadatas=metas[start:end],
+        )
     log.info("Vector index updated for %s (%d chunks).", book_id, len(chunks))
 
 

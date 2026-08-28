@@ -53,7 +53,9 @@ def _setup_logging() -> None:
 
 
 def _slug(pdf_path: Path) -> str:
-    s = re.sub(r"[^a-z0-9]+", "-", pdf_path.stem.lower()).strip("-")
+    # Keep Hangul so Korean filenames don't collapse (물리학 파트 2 -> 물리학-파트-2,
+    # not "2"). Empty only if the stem has no usable chars at all.
+    s = re.sub(r"[^a-z0-9\uac00-\ud7a3]+", "-", pdf_path.stem.lower()).strip("-")
     return s or pdf_path.stem
 
 
@@ -78,7 +80,7 @@ def ingest_pdfs(store: Store, force: bool = False) -> int:
             store.delete_book(book_id)
             store.add_book(book_id, pdf.stem, pdf.name)
             store.add_chunks(chunks)
-            embed_index.index_book(book_id, chunks)
+            embed_index.index_book(book_id, chunks, force=force)
             shutil.move(str(pdf), str(settings.books_processed / pdf.name))
             indexed += 1
             log.info("Indexed %s: %d chunks.", book_id, len(chunks))
