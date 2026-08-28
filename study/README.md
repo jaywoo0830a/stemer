@@ -112,6 +112,12 @@ docker compose -f docker/docker-compose.yml run --rm pipeline python tools/pipel
   `python tools/pipeline.py --once --force --index-only` 실행.
 - **인덱스 초기화** → `rm -rf study/index` 후 `--index-only` 재실행
   (markdown 캐시가 있어 재파싱 없이 빠릅니다).
+- **전체 초기화** → `manage.py reset-all --yes`: registry·인덱스·업로드 PDF·
+  노트·로그를 모두 삭제해 최초 설치 상태로 되돌립니다. `AGENTS.md`와
+  템플릿, HF 모델 캐시는 유지됩니다. 실행 전 워커 중지 권장:
+  `docker compose -f study/docker/docker-compose.yml stop pipeline api`
+- **청킹 규칙 적용** → `python tools/test_chunk.py`로 휴리스틱 검증 후
+  `python tools/manage.py reindex-all`로 전체 재인덱싱 (책당 임베딩 약 1시간).
 
 ## 9. TOPICS.md / AGENTS.md를 DB로 관리하기
 
@@ -123,6 +129,10 @@ SQLite 레지스트리 **`study/registry.db`가 원본**이고, 마크다운 파
 cd study
 python tools/manage.py --help
 python tools/manage.py status    # registry + 인덱스 + 진행 상태 한눈에
+python tools/manage.py reindex <book_id>   # 청킹 로직 변경 후 한 권만 재인덱싱
+python tools/manage.py reindex-all         # 전부 재인덱싱 (책당 약 1시간, 재파싱 없음)
+python tools/manage.py reset-all --yes     # DB·인덱스·업로드 PDF·노트·로그 전체 초기화
+python tools/test_chunk.py                  # 청킹 휴리스틱 테스트 29개
 
 # 초기화 (첫 실행 시 기존 TOPICS.md/AGENTS.md를 자동으로 DB에 올림)
 python tools/manage.py init
