@@ -15,12 +15,13 @@ fi
 
 cd docker
 [ -f .env ] || cp .env.example .env
-echo "Building and starting the pipeline watcher ..."
-docker compose up -d --build
+echo "Building the pipeline image ..."
+docker compose build pipeline
 
 echo "Prefetching embedding + reranker models (one-time download, several GB) ..."
-docker compose exec pipeline python -u tools/pipeline.py --prefetch
+docker compose run --rm pipeline python -u tools/study.py prefetch
 
 echo
-echo "Done. Drop PDFs into: $(cd .. && pwd)/books/inbox/"
-echo "The watcher picks them up automatically. Logs: study/logs/pipeline.log"
+echo "Done. Drop PDFs into: $(cd .. && pwd)/books/inbox/  (SCP/SFTP)"
+echo "The scheduler picks them up automatically. Run: bash $(cd .. && pwd)/pipeline.sh watch"
+echo "Logs: study/logs/pipeline.log"

@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-"""Tests for the RAG core modules: store, registry, topics, generate, retrieve, api.
+"""Tests for the RAG core modules: store, registry, topics, generate, retrieve, figures.
 
 Run inside the pipeline container:
-    docker compose -f docker/docker-compose.yml exec pipeline python tools/test_rag.py
-or in any environment with chromadb / fastapi / httpx installed.
+    docker compose -f docker/docker-compose.yml run --rm pipeline python tools/test_rag.py
+or in any environment with chromadb / httpx installed.
 Groups whose dependencies are missing are skipped (reported at the end).
 
 Exit code 0 = no failures.
 """
 from __future__ import annotations
 
-import io
 import os
 import pathlib
 import sys
 import tempfile
-import zipfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -243,68 +241,16 @@ def test_retrieve() -> None:
 
 
 # ---------------------------------------------------------------------------
-# api (FastAPI endpoints) — needs fastapi + httpx
-# ---------------------------------------------------------------------------
-def test_api() -> None:
-    try:
-        import fastapi  # noqa: F401
-        from fastapi.testclient import TestClient
-    except ImportError as exc:
-        skip("api", f"fastapi missing: {exc}")
-        return
-    print("api — endpoints:")
-    import api
-    from rag import registry
-
-    fresh_env()
-    registry._ready = False
-    client = TestClient(api.app)
-
-    check("health", client.get("/api/health").json() == {"ok": True})
-    st = client.get("/api/status").json()
-    check("status shape",
-          {"books", "topics", "notes", "problems", "log_tail", "llama_healthy"} <= set(st))
-
-    check("agents get/set", client.post("/api/agents", json={"content": "X"}).json() == {"saved": True}
-          and client.get("/api/agents").json()["content"] == "X")
-
-    check("topic add", client.post("/api/topics", json={"topic": "CLT", "book": "prob"}).json() == {"saved": True})
-    check("problems topic add", client.post(
-        "/api/topics", json={"topic": "ODE", "book": "prob", "kind": "problems"}).json() == {"saved": True})
-    check("topic patch", client.patch("/api/topics/CLT", json={"status": "draft"}).json() == {"saved": True})
-    check("topic kind patch", client.patch("/api/topics/CLT", json={"kind": "problems"}).json() == {"saved": True})
-    check("topic 404", client.patch("/api/topics/nope", json={"status": "done"}).status_code == 404)
-
-    check("pdf upload", "saved" in client.post(
-        "/api/books/upload", files={"file": ("book.pdf", b"%PDF", "application/pdf")}).json())
-    check("non-pdf rejected", client.post(
-        "/api/books/upload", files={"file": ("x.txt", b"x", "text/plain")}).status_code == 400)
-    check("inbox received", any(settings.books_inbox.glob("book.pdf")))
-
-    (settings.notes_dir / "n1.md").write_text("# n1\n$$\nx\n$$", encoding="utf-8")
-    settings.problems_dir.mkdir(exist_ok=True)
-    (settings.problems_dir / "ode-solutions.md").write_text("# sol", encoding="utf-8")
-    r = client.get("/api/notes/download")
-    check("zip download", r.status_code == 200 and r.headers["content-type"] == "application/zip")
-    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
-    check("zip members incl. problems/", names == ["n1.md", "problems/ode-solutions.md"])
-    check("single note", client.get("/api/notes/n1.md").status_code == 200)
-    check("problems list", client.get("/api/problems").json() == ["ode-solutions.md"])
-    check("problems file", client.get("/api/problems/ode-solutions.md").status_code == 200)
-    check("path traversal blocked", client.get("/api/notes/..%2F..%2Fetc%2Fpasswd").status_code == 404)
-
-
-# ---------------------------------------------------------------------------
 # figures + vlm (figure extraction and description attachment)
 # ---------------------------------------------------------------------------
 def test_figures() -> None:
     print("figures + vlm — extract, caption, attach descriptions:")
     try:
         from PIL import Image
+        from rag import figures, vlm  # noqa: F401  (needs httpx)
     except ImportError as exc:
-        skip("figures", f"pillow missing: {exc}")
+        skip("figures", f"pillow/httpx missing: {exc}")
         return
-    from rag import figures, vlm
 
     root = fresh_env()
 
@@ -376,7 +322,6 @@ def main() -> None:
     test_registry()
     test_generate()
     test_retrieve()
-    test_api()
     test_figures()
     print(f"== {_PASS} passed, {_FAIL} failed, {len(_SKIPS)} skipped ==")
     for s in _SKIPS:

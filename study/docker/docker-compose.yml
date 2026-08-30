@@ -18,6 +18,7 @@ x-rag-env: &rag-env
   REASONING_EFFORT: ${REASONING_EFFORT:-low}
   MAX_TOKENS: ${MAX_TOKENS:-4096}
   WATCH_INTERVAL_S: ${WATCH_INTERVAL_S:-300}
+  LLM_START_TIMEOUT_S: ${LLM_START_TIMEOUT_S:-180}
   OMP_NUM_THREADS: ${OMP_NUM_THREADS:-14}
   VLM_BASE_URL: ${VLM_BASE_URL:-}
   VLM_API_KEY: ${VLM_API_KEY:-}
@@ -27,35 +28,23 @@ x-rag-env: &rag-env
   DOCLING_OCR_MODE: ${DOCLING_OCR_MODE:-default}
   DOCLING_OCR_LANG: ${DOCLING_OCR_LANG:-en}
   DOCLING_HEADING_HIERARCHY: ${DOCLING_HEADING_HIERARCHY:-on}
+  DOCLING_CHART_EXTRACTION: ${DOCLING_CHART_EXTRACTION:-on}
+  DOCLING_CODE_ENRICHMENT: ${DOCLING_CODE_ENRICHMENT:-on}
+  DOCLING_PICTURE_DESCRIPTION: ${DOCLING_PICTURE_DESCRIPTION:-off}
+  DOCLING_PICTURE_PRESET: ${DOCLING_PICTURE_PRESET:-smolvlm}
+  DOCLING_PICTURE_AREA_THRESHOLD: ${DOCLING_PICTURE_AREA_THRESHOLD:-0.05}
+  DOCLING_LAYOUT_PRESET: ${DOCLING_LAYOUT_PRESET:-}
 
 services:
-  # Overnight worker: indexes inbox PDFs and generates notes for todo topics.
+  # Functional phase runner (run-once) — driven by study/pipeline.sh:
+  #   docker compose run --rm pipeline python tools/study.py <index|generate|prefetch|status>
   pipeline:
     <<: *rag-common
     # host networking: llama-server listens on the host's 127.0.0.1:8000.
     network_mode: host
     environment: *rag-env
-    command: ["python", "-u", "tools/pipeline.py", "--watch"]
-    restart: unless-stopped
-
-  # Web API for the UI (upload / agents / topics / status / notes ZIP).
-  api:
-    <<: *rag-common
-    network_mode: host
-    environment: *rag-env
-    command: ["python", "-u", "tools/api.py"]
-    restart: unless-stopped
-
-  # Plain-HTML UI + API reverse proxy, exposed on the host's port 8080.
-  web:
-    image: nginx:alpine
-    network_mode: host
-    volumes:
-      - ../web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ../web/index.html:/usr/share/nginx/html/index.html:ro
-    depends_on:
-      - api
-    restart: unless-stopped
+    command: ["python", "-u", "tools/study.py", "status"]
+    restart: "no"
 
 volumes:
   hf-cache:

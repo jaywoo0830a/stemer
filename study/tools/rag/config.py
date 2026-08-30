@@ -30,6 +30,13 @@ def _env_int(key: str, default: int) -> int:
         return default
 
 
+def _env_float(key: str, default: float) -> float:
+    try:
+        return float(os.environ.get(key, str(default)))
+    except ValueError:
+        return default
+
+
 @dataclass
 class Settings:
     # --- paths -----------------------------------------------------------
@@ -83,6 +90,11 @@ class Settings:
     def registry_file(self) -> Path:
         return self.study_root / "registry.db"
 
+    @property
+    def chunking_dir(self) -> Path:
+        """YAML chunking profiles: chunking.yaml + per-book chunking.<book_id>.yaml."""
+        return self.study_root / "config"
+
     # --- chunking ----------------------------------------------------------
     chunk_min_chars: int = field(default_factory=lambda: _env_int("CHUNK_MIN_CHARS", 400))
     chunk_max_chars: int = field(default_factory=lambda: _env_int("CHUNK_MAX_CHARS", 1500))
@@ -108,6 +120,38 @@ class Settings:
     vlm_api_key: str = _env("VLM_API_KEY", "")
     vlm_model: str = _env("VLM_MODEL", "local")
     vlm_timeout_s: int = field(default_factory=lambda: _env_int("VLM_TIMEOUT_S", 600))
+    # docling's built-in picture description (do_picture_description); when on,
+    # the custom VLM figure-captioning (figures.py/vlm.py) is skipped.
+    docling_picture_description: str = _env("DOCLING_PICTURE_DESCRIPTION", "off")  # on | off
+
+    @property
+    def native_picture_description(self) -> bool:
+        """Whether docling's built-in picture description is enabled."""
+        return self.docling_picture_description.strip().lower() == "on"
+
+    # --- docling parsing (2.123.1) ----------------------------------------------
+    docling_images_scale: float = field(default_factory=lambda: _env_float("DOCLING_IMAGES_SCALE", 2.0))
+    docling_formula_preset: str = _env("DOCLING_FORMULA_PRESET", "codeformulav2")
+    docling_ocr_mode: str = _env("DOCLING_OCR_MODE", "default")     # default | full_page
+    docling_ocr_lang: str = _env("DOCLING_OCR_LANG", "en")
+    docling_heading_hierarchy: str = _env("DOCLING_HEADING_HIERARCHY", "on")
+    docling_chart_extraction: str = _env("DOCLING_CHART_EXTRACTION", "on")
+    docling_code_enrichment: str = _env("DOCLING_CODE_ENRICHMENT", "on")
+    docling_picture_preset: str = _env("DOCLING_PICTURE_PRESET", "smolvlm")
+    docling_picture_area_threshold: float = field(default_factory=lambda: _env_float("DOCLING_PICTURE_AREA_THRESHOLD", 0.05))
+    docling_layout_preset: str = _env("DOCLING_LAYOUT_PRESET", "")  # "" = docling default
+
+    @property
+    def docling_heading_hierarchy_enabled(self) -> bool:
+        return self.docling_heading_hierarchy.strip().lower() != "off"
+
+    @property
+    def docling_chart_extraction_enabled(self) -> bool:
+        return self.docling_chart_extraction.strip().lower() != "off"
+
+    @property
+    def docling_code_enrichment_enabled(self) -> bool:
+        return self.docling_code_enrichment.strip().lower() != "off"
 
     # --- llama-server ---------------------------------------------------------
     llama_base_url: str = _env("LLAMA_BASE_URL", "http://127.0.0.1:8000/v1")
@@ -118,6 +162,8 @@ class Settings:
     top_p: float = 0.95
     top_k: int = 20
     request_timeout_s: int = field(default_factory=lambda: _env_int("REQUEST_TIMEOUT_S", 3 * 3600))
+    # how long the generate phase waits for the host to bring llama-server up
+    llm_start_timeout_s: int = field(default_factory=lambda: _env_int("LLM_START_TIMEOUT_S", 180))
 
     # --- pipeline --------------------------------------------------------------
     watch_interval_s: int = field(default_factory=lambda: _env_int("WATCH_INTERVAL_S", 300))

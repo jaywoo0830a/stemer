@@ -143,6 +143,47 @@ def caption_figures(stem: str) -> int:
     return done
 
 
+def native_descriptions(doc, stem: str) -> int:
+    """Harvest docling's built-in picture descriptions into descriptions.json.
+
+    Runs inside parse_pdf right after extract_figures when native picture
+    description (do_picture_description) is enabled. Both functions iterate
+    doc.pictures with the same no-image skip logic, so fig-<n>.png names line up
+    with the pictures and their meta.description texts.
+    """
+    out_dir = figures_dir_for(stem)
+    if not out_dir.exists():
+        return 0
+    descs: dict[str, str] = {}
+    count = 0
+    for pic in getattr(doc, "pictures", []):
+        try:
+            img = pic.get_image(doc)
+        except Exception:
+            img = None
+        if img is None:
+            continue
+        count += 1
+        try:
+            meta = getattr(pic, "meta", None)
+            desc = ""
+            if meta is not None:
+                d = getattr(meta, "description", None)
+                if d is not None:
+                    desc = (getattr(d, "text", "") or "").strip()
+        except Exception:
+            desc = ""
+        if desc:
+            descs[f"fig-{count:05d}.png"] = desc
+    if not descs:
+        return 0
+    descriptions_path(stem).write_text(
+        json.dumps(descs, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    log.info("Harvested %d native docling picture description(s) for %s.", len(descs), stem)
+    return len(descs)
+
+
 def attach_descriptions(chunks: list, stem: str) -> int:
     """Append figure descriptions to chunks containing the figure caption.
 

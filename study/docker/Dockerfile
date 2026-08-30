@@ -29,4 +29,6 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # /data is the mounted study/ directory (see docker-compose.yml).
 WORKDIR /data
 
-CMD ["python", "-u", "tools/pipeline.py", "--watch"]
+# Run-once phase runner — study/pipeline.sh passes the phase as an argument
+# (index|generate|prefetch|status|...) via `docker compose run --rm pipeline`.
+CMD ["python", "-u", "tools/study.py", "status"]

@@ -2,7 +2,7 @@
 
 자택/사무실 서버(**Ryzen 7 9700X · 64GB DDR5-5200 On-Die ECC · NVMe 소프트 RAID**)에서
 Qwen3.6-27B를 서빙하고, SSH 포워딩 또는 LAN으로 VS Code 에이전트를 연결해 쓰는 구성입니다.
-교재 PDF → RAG 인덱싱 → 학습 노트/문제 세트 자동 생성 파이프라인(웹 UI 포함)도 담습니다.
+교재 PDF → RAG 인덱싱 → 학습 노트/문제 세트 자동 생성 파이프라인(CLI 기반)도 담습니다.
 
 문서는 딱 두 개입니다:
 - **이 파일**: 서버(모델 서빙) · VS Code 에이전트 연결 · 설정 근거 · 트러블슈팅
@@ -24,16 +24,20 @@ graph LR
 | `./init.sh` | 의존성 설치 · llama.cpp 빌드(AVX-512) · 모델 다운로드(~29GB) | 최초 1회 |
 | `./up.sh` | 서버 시작 + 헬스체크 + 접속 정보 출력 | 평상시 |
 | `./down.sh` | 서버 종료 | 평상시 |
-| `./worker-up.sh` | RAG 파이프라인(인덱싱·노트생성) + 웹 UI 시작 | 평상시 |
-| `./worker-down.sh` | RAG 파이프라인 + 웹 UI 종료 | 평상시 |
+| `./worker-up.sh` | RAG 파이프라인(인덱싱·노트생성) 준비 + watcher 시작 | 평상시 |
+| `./worker-down.sh` | RAG 파이프라인 watcher 중지 + 컨테이너 종료 | 평상시 |
 
 ```bash
 ./init.sh        # 1회 (빌드 3~6분 + 다운로드 시간. 중단 후 재실행하면 이어받기)
 ./up.sh          # 시작 (첫 로딩 1~2분)
-./worker-up.sh   # RAG 워커 + 웹 UI 시작 (http://<서버_IP>:8080)
-./worker-down.sh # RAG 워커 + 웹 UI 종료
+./worker-up.sh   # RAG 파이프라인 이미지 빌드 + watcher 시작
+./worker-down.sh # watcher 중지 + 컨테이너 종료
 ./down.sh        # 종료
 ```
+
+- PDF는 SCP로 `study/books/inbox/`에 넣으면 watcher가 자동 인덱싱합니다 (웹 UI 없음).
+- 생성·인덱싱 조작은 `study/pipeline.sh` (또는 `python tools/study.py`)로 합니다.
+  자세한 사용법은 **[study/README.md](study/README.md)**.
 
 - 로그: `logs/llama-server.log`, PID: `llama-server.pid`
 - 튜닝은 `config.env` 하나만 수정하면 됩니다 (재시작 시 반영).

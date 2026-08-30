@@ -30,8 +30,7 @@ graph LR
 
 ## 2. AGENTS.md에 쓸 내용 (미분방정식 예제)
 
-아래 내용을 웹 UI **구역 2**의 텍스트박스에 붙여넣거나,
-`AGENTS.md` 파일에 저장 후 `manage.py docs set agents --file AGENTS.md`로 반영합니다.
+아래 내용을 `AGENTS.md` 파일에 저장 후 `study.py docs set agents --file AGENTS.md`로 반영합니다.
 
 ```markdown
 # Study note conventions (canonical)
@@ -97,7 +96,7 @@ Follow templates/warmup.md.
 
 - **topic**: 노트 제목 (영어). 섹션 제목을 그대로 쓰면 검색이 가장 정확합니다.
 - **book**: PDF 파일명에서 파생된 book_id. `공학수학.pdf`를 업로드했다면 `공학수학`.
-  (`manage.py status`에서 실제 id 확인 가능)
+  (`study.py status`에서 실제 id 확인 가능)
 - **section**: 주제가 있는 교재 섹션 번호. 검색 **1순위 후보**로 원문 전체가 주입됩니다.
 - **kind**: `note` = 개념 노트 1편 / `problems` = **기초 10 + 중급 이상 10 문제**와
   **별도 솔루션 파일** 2개 생성.
@@ -115,9 +114,9 @@ grep -nE '^#{1,3} ' ~/projects/stemer/study/books/markdown/공학수학.md | hea
 
 ```bash
 cd ~/projects/stemer/study
-DC="docker compose -f docker/docker-compose.yml exec pipeline python tools/manage.py"
+DC="docker compose -f docker/docker-compose.yml run --rm pipeline python -u tools/study.py"
 
-# ① 교재 등록 (선택 — UI 드롭다운용)
+# ① 교재 등록
 $DC books add 공학수학 --title "공학수학" --author "저자명"
 
 # ② 규칙 등록 (AGENTS.md 파일을 DB로)
@@ -134,9 +133,7 @@ $DC topics add "Separable equations practice" --book 공학수학 --section 1.3 
 $DC status
 ```
 
-웹 UI(`http://<서버_IP>:8080`)로 하면 ②는 구역 2, ③은 구역 3에서 클릭만으로 됩니다.
-
----
+(웹 UI는 제거됨 — PDF는 SCP로 `books/inbox/`에 넣습니다)
 
 ## 5. 생성 결과물 예시 (notes/separable-equations.md)
 
@@ -199,7 +196,7 @@ todo ──(밤새 자동 생성)──▶ draft ──(사람이 교재 대조)
 
 | 실수 | 결과 | 해결 |
 |---|---|---|
-| book 값을 PDF 파일명과 다르게 씀 | 검색이 0건 → 노트 안 생김 | `manage.py status`의 book_id 확인 |
+| book 값을 PDF 파일명과 다르게 씀 | 검색이 0건 → 노트 안 생김 | `study.py status`의 book_id 확인 |
 | 섹션 번호를 추측으로 씀 | 엉뚱한 섹션 주입 | markdown 캐시에서 목차 grep으로 확인 |
 | topic을 한국어로 씀 | 규칙(영어)과 충돌, 검색 저하 | topic만 영어로 |
 | AGENTS를 비워둠 | 기본 규칙으로만 생성 | §2 예제를 복사해 넣기 |

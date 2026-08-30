@@ -1,0 +1,174 @@
+# =============================================================================
+# chunking.yaml — 기본 청킹 프로파일 (모든 책에 적용)
+#
+# 이 파일만 바꾸면 코드 수정 없이 청킹 휴리스틱을 조정할 수 있습니다.
+# 책별 오버라이드: config/chunking.<book_id>.yaml (이 파일 위에 딥머지됨)
+#
+# 규칙:
+#   - 모든 정규식은 re.match (헤딩 제목의 앞부분에서 시작) + 대소문자 무시로
+#     매칭됩니다.
+#   - YAML에서 정규식을 쓸 때는 **작은따옴표('...')** 로 감싸세요. 큰따옴표는
+#     \s, \d 같은 이스케이프를 YAML이 처리해 깨질 수 있습니다.
+#   - 섹션 패턴의 named group: major, minor, title (title은 선택).
+# =============================================================================
+
+chunk:
+  min_chars: 400          # 이보다 작은 청크는 다음 청크에 병합
+  max_chars: 1500         # 이보다 큰 청크는 문단 경계에서 분할
+  overlap: 150            # 긴 문단 하드 분할 시 유지할 중복 문자 수
+  drop_front_matter: true # 첫 번호 섹션 이전(표지/목차/머리말) 제거
+  merge_small_chunks: true # 작은 청크를 다음 청크에 병합
+  auto_chapter: true       # 섹션 major가 현재 챕터 번호와 다르면 "Chapter N" 자동 지정
+
+# --- 번호가 붙은 섹션을 여는 헤딩 형태 (위에서 아래로 우선 시도) ---
+sections:
+  number_at_end: '^(?P<title>.+?)\s+(?P<major>\d{1,3})[\.-](?P<minor>\d{1,3})\s*$'
+  number_at_start: '^(?P<major>\d{1,3})[\.-](?P<minor>\d{1,3})\s+(?P<title>.+)$'
+  bare_number: '^(?P<major>\d{1,3})[\.-](?P<minor>\d{1,3})$'
+  section_word: '^section\s+(?P<major>\d{1,3})[\.-](?P<minor>\d{1,3})\s*(?P<title>.*)$'
+
+# --- 챕터 시작 헤딩 ---
+chapters:
+  word: '^\s*(?:chapter|part)\s+(?P<major>\d{1,3})\s*$'
+  number_title: '^\s*(?P<major>\d{1,3})\s+[A-Za-z가-힣]'
+
+# --- 백매터(답지/해답/부록/색인) — 자체 검색 가능한 챕터로 분리 ---
+backmatter:
+  enabled: true
+  patterns:
+    - '^answers?\s+to'
+    - '^solutions?\s+to'
+    - '^solutions?\s+manual'
+    - '^answer\s+key'
+    - '^appendix\b'
+    - '^index\b'
+    - '^glossary\b'
+
+# --- 노이즈 헤딩: 개요를 쪼개지 않고 본문 텍스트로 유지 ---
+# 각 항목은 접두어 패턴 (re.match + 대소문자 무시). 책/출판사별 잡다한
+# 퍼니처(webassign, cengage, ...)도 여기 추가하면 됩니다.
+noise:
+  patterns:
+    # 캡션 / 블록 / 라벨 박스
+    - 'figure'
+    - 'solution'
+    - 'example'
+    - 'table'
+    - 'problem'
+    - 'proof'
+    - 'theorem'
+    - 'lemma'
+    - 'corollary'
+    - 'axiom'
+    - 'definition'
+    - 'definitions'
+    - 'property'
+    - 'properties'
+    - 'rule'
+    - 'rules'
+    - 'answers?\s+to'
+    - 'answer\s+key'
+    - 'checkpoint'
+    - 'practice'
+    - 'quiz'
+    - 'test\s+yourself'
+    - 'self[- ]test'
+    - 'check\s+your\s+understanding'
+    - 'vocabulary'
+    - 'key\s+terms?'
+    - 'key\s+concepts?'
+    - 'checklist'
+    - 'objectives?'
+    - 'learning\s+targets?'
+    - 'essential\s+question'
+    - 'big\s+idea'
+    - 'big\s+question'
+    - 'why\s+you\s+should'
+    - 'what\s+you\s+should'
+    - 'chapter\s+opener'
+    - 'chapter\s+summary'
+    - 'lesson'
+    - 'how\s+to'
+    - 'getting\s+started'
+    - 'quick\s+check'
+    - 'try\s+it'
+    - 'explore'
+    - 'investigat'
+    - 'activity'
+    - 'activities'
+    - 'applied\s+project'
+    - 'discovery\s+project'
+    - 'writing\s+project'
+    - 'project'
+    - 'laboratory'
+    - 'lab\b'
+    - 'case\s+study'
+    - 'animation'
+    - 'video'
+    - 'focus\s+on'
+    - 'connection'
+    - 'extension'
+    - 'extend'
+    # 앞/뒤 표지 & 출판사 퍼니처
+    - 'diagnostic'
+    - 'webassign'
+    - 'cengage'
+    - 'stewart'
+    - 'ancillar'
+    - 'acknowledg'
+    - 'about\s+the\s+authors'
+    - 'a\s+tribute'
+    - 'to\s+the\s+student'
+    - 'preface'
+    - 'alternate'
+    - "what'?s\s+new"
+    - 'features'
+    - 'content'
+    - 'instructor'
+    - 'test\s+bank'
+    - 'complete\s+solutions'
+    - 'single\s+variable'
+    - 'multivariable'
+    - 'problems\s+plus'
+    - 'appendix'
+    - 'reference\s+page'
+    - 'reviewers'
+    - 'technology'
+    - 'graphing\s+icon'
+    - 'technology\s+icon'
+    - 'table\s+of\s+contents'
+    - 'contents'
+    - 'index'
+    - 'glossary'
+    - 'bibliography'
+    - 'references'
+    - 'credits'
+    - 'photo\s+credits'
+    - 'copyright'
+    - 'isbn'
+    - 'cataloging'
+    - 'library\s+of\s+congress'
+    - 'all\s+rights\s+reserved'
+    - 'printed\s+in'
+    - 'edition'
+    - 'mylab'
+    - 'mastering'
+    - 'mindtap'
+    - 'online'
+    - 'homework'
+    - 'calcchat'
+    - 'calcview'
+    - 'new\s+from'
+    - 'real[-\s]?world'
+    - 'summary'
+    - 'review'
+    - 'n\s+'
+    - '■'
+  short_title_max_chars: 20  # 번호 없는 이보다 짧은 헤딩은 본문으로
+  drop_single_letters: true  # 한 글자 헤딩("D", "a")은 본문으로
+  drop_symbols_only: true    # 기호만 1~3자 헤딩("■", ";;")은 본문으로
+
+# --- 헤딩 레벨 폴백 (위 규칙에 걸리지 않는 번호 없는 헤딩) ---
+headings:
+  level_chapter_max: 2   # level <= 이면 챕터로 취급
+  level_section_max: 3   # level <= 이면 섹션으로 취급

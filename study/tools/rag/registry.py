@@ -5,8 +5,8 @@ Design:
 - TOPICS.md / AGENTS.md / templates/warmup.md are exported snapshots kept in
   git for human review and diffs.
 - First use auto-imports the existing markdown files (migration).
-  Afterwards edit through `python tools/manage.py ...`, or edit the markdown
-  by hand and run `python tools/manage.py import` to load it back.
+  Afterwards edit through `python tools/study.py books|topics|docs ...`, or edit
+  the markdown by hand and run `python tools/study.py import` to load it back.
 """
 from __future__ import annotations
 
@@ -210,9 +210,9 @@ def export_topics_md() -> None:
     lines = [
         "# TOPICS — textbook register & topic -> section map",
         "",
-        "> Source of truth: `registry.db`. Manage with `python tools/manage.py` —",
+        "> Source of truth: `registry.db`. Manage with `python tools/study.py` —",
         "> this file is an exported snapshot. Hand edits are applied with",
-        "> `python tools/manage.py import`.",
+        "> `python tools/study.py import`.",
         "",
         "## Format",
         "",
