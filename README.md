@@ -26,6 +26,7 @@ graph LR
 | `./down.sh` | 서버 종료 | 평상시 |
 | `./worker-up.sh` | RAG 파이프라인(인덱싱·노트생성) 준비 + watcher 시작 | 평상시 |
 | `./worker-down.sh` | RAG 파이프라인 watcher 중지 + 컨테이너 종료 | 평상시 |
+| `./factory-reset.sh` | 업로드한 PDF만 남기고 전부 초기화 (watcher 정지 후 재확인) | 문제 시 |
 
 ```bash
 ./init.sh        # 1회 (빌드 3~6분 + 다운로드 시간. 중단 후 재실행하면 이어받기)
@@ -33,6 +34,7 @@ graph LR
 ./worker-up.sh   # RAG 파이프라인 이미지 빌드 + watcher 시작
 ./worker-down.sh # watcher 중지 + 컨테이너 종료
 ./down.sh        # 종료
+./factory-reset.sh  # 업로드 PDF는 유지하고 인덱스·캐시·노트·로그·DB 전체 초기화
 ```
 
 - PDF는 SCP로 `study/books/inbox/`에 넣으면 watcher가 자동 인덱싱합니다 (웹 UI 없음).

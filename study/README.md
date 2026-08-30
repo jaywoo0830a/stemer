@@ -140,6 +140,10 @@ bash study/pipeline.sh stop             # watch 중단
 - **전체 초기화** → `study.py reset-all --yes`: registry·인덱스·업로드 PDF·
   노트·로그를 모두 삭제해 최초 설치 상태로 되돌립니다. `AGENTS.md`와
   템플릿, HF 모델 캐시는 유지됩니다. 실행 전 워커 중지 권장: `./worker-down.sh`
+- **업로드 PDF만 남기고 초기화** → `bash ../factory-reset.sh`:
+  watcher를 정지하고 인덱스·파싱 캐시·그림·노트·로그·registry를 전부 지운 뒤,
+  `books/inbox/`(처리됐던 PDF는 다시 inbox로)만 남깁니다. 확인 후
+  `bash study/pipeline.sh index`로 처음부터 다시 인덱싱하세요.
 - **청킹 규칙 적용** → `python tools/test_chunk.py` +
   `docker compose -f study/docker/docker-compose.yml run --rm pipeline python tools/test_rag.py`로
   검증 후 `python tools/study.py reindex --all`로 전체 재인덱싱 (책당 임베딩 약 1시간).

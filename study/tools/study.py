@@ -21,7 +21,7 @@ Commands:
     import       load TOPICS.md / AGENTS.md / template into the DB
     export       rewrite markdown files from the DB
     status       registry + index + pending + notes in one view
-    reset-all    drop DB tables, index, PDFs, notes, logs [--yes]
+    reset-all    drop DB tables, index, PDFs, notes, logs [--yes] [--keep-pdfs]
 
   books / topics / docs:
     books add <id> --title --author | books list
@@ -190,16 +190,26 @@ def cmd_status(_args) -> int:
 
 
 def cmd_reset_all(args) -> int:
-    """Drop DB tables, index, PDFs, notes and logs — back to a fresh install."""
+    """Drop DB tables, index, PDFs, notes and logs — back to a fresh install.
+
+    With --keep-pdfs the uploaded PDFs survive: processed/ ones are moved back
+    to inbox/ so a subsequent `study.py index` re-parses and re-indexes every
+    book from scratch.
+    """
     from rag import registry
 
     if not args.yes:
         print("This deletes EVERYTHING except AGENTS.md/template/model cache:")
         print("  - registry.db tables (books/topics/docs)")
-        print("  - index/ (rag.db + chroma)")
-        print("  - books/inbox/*.pdf, books/processed/*.pdf, books/markdown/*.md")
-        print("  - notes/*.md, problems/*.md")
-        print("  - logs/*.log")
+        print("  - index/ (rag.db + chroma), books/markdown/ (parse cache), books/figures/")
+        if args.keep_pdfs:
+            print("  - notes/*.md, problems/*.md")
+            print("  - logs/*.log")
+            print("KEPT: books/inbox/*.pdf + books/processed/*.pdf (moved back to inbox).")
+        else:
+            print("  - books/inbox/*.pdf, books/processed/*.pdf")
+            print("  - notes/*.md, problems/*.md")
+            print("  - logs/*.log")
         print("Run again with --yes to confirm.")
         return 1
 
@@ -214,16 +224,33 @@ def cmd_reset_all(args) -> int:
     # ensure_ready() and re-import the old TOPICS.md into the empty DB.
     registry.export_topics_md()
 
-    for p in (settings.index_dir, settings.books_inbox, settings.books_processed,
-              settings.books_markdown, settings.notes_dir, settings.problems_dir,
-              settings.logs_dir):
+    # Wipe derived state: parse cache, index, figures, notes, problems, logs.
+    for p in (settings.index_dir, settings.books_markdown, settings.figures_dir,
+              settings.notes_dir, settings.problems_dir, settings.logs_dir):
         if p.exists():
             shutil.rmtree(p) if p.is_dir() else p.unlink()
+
+    if args.keep_pdfs:
+        # Keep the uploaded PDFs: return processed/ ones to the inbox so a
+        # fresh `study.py index` picks every book up again.
+        settings.books_processed.mkdir(parents=True, exist_ok=True)
+        moved = sorted(settings.books_processed.glob("*.pdf"))
+        for pdf in moved:
+            shutil.move(str(pdf), str(settings.books_inbox / pdf.name))
+        print(f"Kept {len(moved)} processed PDF(s) — moved back to inbox/ for re-indexing.")
+    else:
+        for p in (settings.books_inbox, settings.books_processed):
+            if p.exists():
+                shutil.rmtree(p) if p.is_dir() else p.unlink()
+
     settings.ensure_dirs()
 
     print("Reset complete — fresh-install state.")
-    print("Kept: AGENTS.md, templates/warmup.md, HuggingFace model cache.")
-    print("Next: drop PDFs into books/inbox/ (SCP) and run `study.py index`.")
+    kept = "AGENTS.md, templates/warmup.md, HuggingFace model cache"
+    if args.keep_pdfs:
+        kept += ", uploaded PDFs (books/inbox/)"
+    print(f"Kept: {kept}.")
+    print("Next: run `study.py index` (or `bash study/pipeline.sh index`) — the watcher will pick the inbox up.")
     return 0
 
 
@@ -587,6 +614,8 @@ def main() -> None:
     sub.add_parser("status", help="show registry + index + pending + notes in one view")
     ra = sub.add_parser("reset-all", help="reset DB + index + books + notes to a clean state")
     ra.add_argument("--yes", action="store_true", help="confirm the destructive reset")
+    ra.add_argument("--keep-pdfs", action="store_true",
+                    help="keep uploaded PDFs (processed/ -> inbox/) and wipe everything else")
 
     # --- books / topics / docs ---
     pb = sub.add_parser("books", help="manage the book register")
