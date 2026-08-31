@@ -9,6 +9,8 @@ docling[vlm]==2.123.1
 # Floor at >=4.49; `uv pip compile` (see requirements.lock) locks the newest
 # compatible version so every Docker rebuild is reproducible.
 transformers>=4.49.0
+# Postgres + pgvector backend (Dockerized DB, used when DATABASE_URL is set).
+psycopg[binary]>=3.2
 chromadb>=0.5.5
 sentence-transformers>=3.0.0
 httpx>=0.27.0

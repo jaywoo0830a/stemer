@@ -57,7 +57,7 @@ from rag import llm
 from rag.config import settings
 from rag.parse import parse_pdf
 from rag.retrieve import primary_sections, retrieve
-from rag.store import Store
+from rag.store import Store, open_store
 from rag.topics import load_topics, mark_topic
 
 log = logging.getLogger("rag")
@@ -161,20 +161,28 @@ def cmd_status(_args) -> int:
     print("topics:", ", ".join(f"{s}={counts[s]}" for s in registry.STATUSES))
 
     print()
-    print("=== index (rag.db + chroma) ===")
-    idx_path = settings.index_dir / "rag.db"
-    if idx_path.exists():
-        st = Store(idx_path).stats()
-        print(f"books: {len(st['books'])} | chunks: {st['chunks']}")
-        for row in st["per_book"]:
-            print(f"  {row['book_id']}: {row['chunks']} chunks")
+    print("=== index (DB) ===")
+    if settings.use_pg:
+        try:
+            st = open_store().stats()
+            print(f"postgres | books: {len(st['books'])} | chunks: {st['chunks']}")
+            for row in st["per_book"]:
+                print(f"  {row['book_id']}: {row['chunks']} chunks")
+        except Exception as exc:
+            print(f"(postgres unavailable: {exc} — db 서비스 기동 필요: ./worker-up.sh)")
     else:
-        print("(empty) — run `study.py index` after dropping PDFs into books/inbox/")
-
-    try:
-        print(f"vectors: {embed_index.get_collection().count()}")
-    except Exception:
-        print("vectors: (chromadb not available in this environment)")
+        idx_path = settings.index_dir / "rag.db"
+        if idx_path.exists():
+            st = Store(idx_path).stats()
+            print(f"sqlite   | books: {len(st['books'])} | chunks: {st['chunks']}")
+            for row in st["per_book"]:
+                print(f"  {row['book_id']}: {row['chunks']} chunks")
+        else:
+            print("(empty) — run `study.py index` after dropping PDFs into books/inbox/")
+        try:
+            print(f"vectors (chroma): {embed_index.get_collection().count()}")
+        except Exception:
+            print("vectors (chroma): unavailable in this environment")
 
     inbox = sorted(settings.books_inbox.glob("*.pdf"))
     notes = sorted(settings.notes_dir.glob("*.md")) if settings.notes_dir.exists() else []
@@ -315,14 +323,19 @@ def cmd_docs(args) -> int:
 # Phase A+B: index (LLM OFF — enforced by the host scheduler)
 # ---------------------------------------------------------------------------
 
-def index_one_book(store: Store, pdf: Path, force: bool = False) -> bool:
-    """Parse + chunk + enrich + index a single PDF. Returns success."""
+def _parse_and_chunk(pdf: Path, force: bool = False) -> tuple[str, Path, list] | None:
+    """Parse + chunk + figure-enrich one PDF.
+
+    This is the CPU-heavy stage (Docling + OCR + formula VLM) and is safe to
+    run in a worker process for `index --jobs N`. Returns (book_id, pdf, chunks)
+    or None on failure (PDF stays in inbox).
+    """
     book_id = _slug(pdf)
-    log.info("Ingesting %s (book_id=%s) ...", pdf.name, book_id)
-    md = parse_pdf(pdf, force=force)  # cached markdown in books/markdown/
-    chunks = chunking.split_markdown(md, book_id)
-    if settings.figures_enabled.lower() != "off":
-        try:
+    try:
+        log.info("Ingesting %s (book_id=%s) ...", pdf.name, book_id)
+        md = parse_pdf(pdf, force=force)  # cached markdown in books/markdown/
+        chunks = chunking.split_markdown(md, book_id)
+        if settings.figures_enabled.lower() != "off":
             from rag import figures
 
             # Custom local-VLM figure descriptions are skipped in native mode —
@@ -332,8 +345,18 @@ def index_one_book(store: Store, pdf: Path, force: bool = False) -> bool:
             attached = figures.attach_descriptions(chunks, pdf.stem)
             if attached:
                 log.info("Attached %d figure description(s) for %s.", attached, book_id)
-        except Exception:
-            log.exception("Figure enrichment failed for %s", pdf.name)
+        return book_id, pdf, chunks
+    except Exception:
+        log.exception("Failed to parse %s — leaving it in inbox.", pdf.name)
+        return None
+
+
+def _store_and_embed(store, book_id: str, pdf: Path, chunks: list, force: bool) -> bool:
+    """Write chunks + build vectors + move the PDF to processed/.
+
+    Single-writer stage — runs in the parent process only (SQLite/Postgres and
+    Chroma/pgvector are not fork-safe to share across workers).
+    """
     if not chunks:
         log.warning("No chunks produced for %s — skipping.", pdf.name)
         return False
@@ -346,17 +369,53 @@ def index_one_book(store: Store, pdf: Path, force: bool = False) -> bool:
     return True
 
 
+def index_one_book(store, pdf: Path, force: bool = False) -> bool:
+    """Parse + chunk + enrich + index a single PDF. Returns success."""
+    r = _parse_and_chunk(pdf, force=force)
+    if r is None:
+        return False
+    return _store_and_embed(store, r[0], r[1], r[2], force)
+
+
 def cmd_index(args) -> int:
-    store = Store(settings.index_dir / "rag.db")
+    jobs = max(1, args.jobs or 1)
+    pdfs = [
+        p
+        for p in sorted(settings.books_inbox.glob("*.pdf"))
+        if not args.book or args.book == _slug(p)
+    ]
     indexed = 0
-    for pdf in sorted(settings.books_inbox.glob("*.pdf")):
-        if args.book and args.book != _slug(pdf):
-            continue
-        try:
-            if index_one_book(store, pdf, force=args.force):
-                indexed += 1
-        except Exception:
-            log.exception("Failed to ingest %s — leaving it in inbox.", pdf.name)
+
+    if jobs <= 1:
+        store = open_store()
+        for pdf in pdfs:
+            try:
+                if index_one_book(store, pdf, force=args.force):
+                    indexed += 1
+            except Exception:
+                log.exception("Failed to ingest %s — leaving it in inbox.", pdf.name)
+    else:
+        # Multi-core: parse N PDFs concurrently (each worker loads its own
+        # docling models, ~4-6GB RAM each — so keep N low on 64GB). The store
+        # is opened AFTER the pool exits to avoid fork()+SQLite/pg pitfalls.
+        import multiprocessing as mp
+        from functools import partial
+
+        log.info("index: parsing %d PDF(s) with %d worker(s) in parallel ...", len(pdfs), jobs)
+        ctx = mp.get_context("fork")
+        parsed: list = []
+        with ctx.Pool(jobs) as pool:
+            for r in pool.imap_unordered(partial(_parse_and_chunk, force=args.force), pdfs):
+                if r is not None:
+                    parsed.append(r)
+        store = open_store()
+        for book_id, pdf, chunks in parsed:
+            try:
+                if _store_and_embed(store, book_id, pdf, chunks, args.force):
+                    indexed += 1
+            except Exception:
+                log.exception("Failed to ingest %s — leaving it in inbox.", pdf.name)
+
     pending_index, pending_generate = count_pending()
     log.info(
         "index finished: %d indexed (pending index=%d, generate=%d).",
@@ -438,7 +497,7 @@ def cmd_generate(args) -> int:
         return 0
 
     llm.require_llm()  # host가 pipeline.sh로 llama-server를 켜줘야 함
-    store = Store(settings.index_dir / "rag.db")
+    store = open_store()
     generated = generate_pending(store, only_book=args.book, max_topics=args.max_topics)
     _, pending_generate = count_pending()
     log.info("generate finished: %d generated (pending generate=%d).", generated, pending_generate)
@@ -466,12 +525,10 @@ def cmd_prefetch(_args) -> int:
 # reindex (re-chunk from cached markdown, no PDF re-parse)
 # ---------------------------------------------------------------------------
 
-def _reindex_one(store: Store, book_id: str) -> int | None:
+def _reindex_one(store, book_id: str) -> int | None:
     from rag import chunk, embed_index as _embed
 
-    row = store.conn.execute(
-        "SELECT title, source_pdf FROM books WHERE book_id = ?", (book_id,)
-    ).fetchone()
+    row = store.book_row(book_id)
     if row is None:
         return None
     md_path = settings.books_markdown / f"{row['title']}.md"
@@ -489,11 +546,9 @@ def _reindex_one(store: Store, book_id: str) -> int | None:
 
 
 def cmd_reindex(args) -> int:
-    store = Store(settings.index_dir / "rag.db")
+    store = open_store()
     if args.all:
-        rows = store.conn.execute(
-            "SELECT book_id, title FROM books ORDER BY book_id"
-        ).fetchall()
+        rows = store.list_book_rows()
         if not rows:
             print("No indexed books yet.")
             return 0
@@ -524,7 +579,7 @@ def cmd_note(args) -> int:
     section = args.section or (row.section if row else "") or ""
     out = args.out or (row.note if row and row.note else None)
 
-    store = Store(settings.index_dir / "rag.db")
+    store = open_store()
     refs = [s.strip() for s in section.split(",") if s.strip()] if section else []
     primary = primary_sections(store, args.topic, refs, book)
     cross = retrieve(store, args.topic, book_id=book, k=args.crossref)
@@ -574,6 +629,8 @@ def _add_phase_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--force", action="store_true", help="re-parse PDFs even if markdown cached")
     p.add_argument("--book", default=None, help="restrict to one book_id")
     p.add_argument("--max-topics", type=int, default=None, help="cap topics per pass")
+    p.add_argument("--jobs", type=int, default=None,
+                   help="parse N PDFs concurrently (index only; ~4-6GB RAM per worker)")
 
 
 def main() -> None:
@@ -586,6 +643,8 @@ def main() -> None:
     p = sub.add_parser("index", help="Phase A+B: parse + index inbox PDFs (LLM off)")
     p.add_argument("--force", action="store_true", help="re-parse PDFs even if markdown cached")
     p.add_argument("--book", default=None, help="restrict to one book_id")
+    p.add_argument("--jobs", type=int, default=None,
+                   help="parse N PDFs concurrently (default 1; ~4-6GB RAM per worker)")
 
     p = sub.add_parser("generate", help="Phase C: generate pending notes (LLM must be up)")
     p.add_argument("--book", default=None, help="restrict to one book_id")

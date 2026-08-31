@@ -18,6 +18,9 @@ cd docker
 echo "Building the pipeline image ..."
 docker compose build pipeline
 
+echo "Starting the Dockerized Postgres+pgvector DB ..."
+docker compose up -d db
+
 echo "Prefetching embedding + reranker models (one-time download, several GB) ..."
 docker compose run --rm pipeline python -u tools/study.py prefetch
 

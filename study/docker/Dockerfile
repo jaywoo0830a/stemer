@@ -1,5 +1,7 @@
 # Study-note RAG pipeline image (CPU only).
-FROM python:3.11-slim-bookworm
+# Python 3.14 (docling 2.123.1 requires >=3.10; lock compiled with
+# `uv pip compile requirements.txt -o requirements.lock --python-version 3.14`).
+FROM python:3.14-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
@@ -22,7 +24,7 @@ RUN apt-get update \
 # versions in sync — mixing PyPI's CUDA-built torchvision with CPU torch
 # breaks with "operator torchvision::nms does not exist".
 # Versions are pinned to requirements.lock (regenerate via
-# `uv pip compile requirements.txt -o requirements.lock --python-version 3.11`).
+# `uv pip compile requirements.txt -o requirements.lock --python-version 3.14`).
 RUN pip install --no-cache-dir \
         torch==2.13.0 torchvision==0.28.0 \
         --index-url https://download.pytorch.org/whl/cpu

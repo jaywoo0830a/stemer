@@ -46,6 +46,11 @@ if [[ -n "$NEED_BUILD" ]]; then
   docker compose build pipeline
 fi
 
+# Postgres+pgvector DB (Dockerized) — 기동 (멱등, 데이터는 pgdata 볼륨에 유지)
+# DATABASE_URL이 비어 있으면 SQLite+Chroma를 쓰므로 db는 불필요하지만,
+# 켜 둬도 무해합니다.
+docker compose up -d db
+
 # 파이프라인 watcher (호스트) — WATCHER_ENABLE=on 이면 백그라운드로 기동
 WATCH_SCRIPT="$ROOT/study/pipeline.sh"
 WATCH_PID_FILE="$ROOT/logs/pipeline-watch.pid"

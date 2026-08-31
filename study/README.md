@@ -79,12 +79,17 @@ bash study/pipeline.sh note "Normal distribution" --book prob --section 3.5 --up
 ```bash
 bash study/pipeline.sh watch            # index → (pending 없으면) generate, 반복
 bash study/pipeline.sh once             # index → (pending 없으면) generate
-bash study/pipeline.sh index [--force]  # Phase A+B만 (LLM off)
+bash study/pipeline.sh index [--force] [--jobs N]   # Phase A+B만 (LLM off)
 bash study/pipeline.sh generate [--book prob]   # Phase C만 (LLM up/down 자동)
 bash study/pipeline.sh prefetch         # 모델 다운로드
 bash study/pipeline.sh status           # pending_index / pending_generate
 bash study/pipeline.sh stop             # watch 중단
 ```
+
+- **`index --jobs N` (멀티코어)**: 책 여러 권을 동시에 파싱합니다 (PDF 1권당
+  docling 모델 ~4-6GB RAM). 64GB에서 LLM off일 때 `--jobs 2` 정도가 안전합니다.
+  파싱만 병렬이고, DB 쓰기/임베딩은 단일 프로세스로 직렬 처리됩니다.
+  (컨테이너 직접 호출: `python tools/study.py index --jobs 2`)
 
 `LLM_MANAGED=off`로 두면 `pipeline.sh`는 llama-server를 건드리지 않으므로
 `./up.sh` / `./down.sh`로 직접 관리합니다.
@@ -101,7 +106,18 @@ bash study/pipeline.sh stop             # watch 중단
 | `LLM_MANAGED` | `on` | `pipeline.sh`가 up.sh/down.sh로 llama-server 생명주기 관리 |
 | `WATCHER_ENABLE` | `on` | `worker-up.sh`가 `pipeline.sh watch`를 백그라운드로 기동 |
 | `LLM_START_TIMEOUT_S` | `180` | 생성 단계에서 llama-server 기동 대기 최대 시간(초) |
+| `DATABASE_URL` | `postgresql://study:study@127.0.0.1:5432/study` | **Dockerized Postgres+pgvector** 백엔드. 비우면 기존 SQLite+Chroma |
+| `PG_USER/PG_PASSWORD/PG_DB` | `study` | db 서비스 자격증명 |
 | `OMP_NUM_THREADS` | `14` | 파싱/임베딩용 스레드 (llama-server에 여유를 남김) |
+
+- **DB 백엔드 전환**: `DATABASE_URL`을 비우면(기존 SQLite+Chroma) 그대로,
+  설정하면 Dockerized Postgres 17 + pgvector(pg_trgm 어휘 검색 + HNSW 벡터)를
+  씁니다. `worker-up.sh`가 `db` 서비스를 자동 기동하고, 데이터는 `pgdata`
+  볼륨에 유지됩니다. 백엔드를 바꾸면 **재인덱싱이 필요**합니다
+  (`study.py reindex --all` 또는 `pipeline.sh index`).
+- **이미지/런타임**: Python **3.14** 이미지, 의존성은 `requirements.lock`으로
+  고정 (재생성: `uv pip compile requirements.txt -o requirements.lock
+  --python-version 3.14`). requirements 변경 시 `./worker-up.sh --build`.
 
 고급: `EMBED_MODEL`, `RERANK_MODEL`, `CHUNK_MAX_CHARS`, `N_CROSSREF` 등은
 `tools/rag/config.py`에서 환경변수로 재정의할 수 있습니다.

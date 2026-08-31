@@ -44,6 +44,20 @@ def _fts_quote(term: str) -> str:
     return quoted + "*" if _has_hangul(term) else quoted
 
 
+def open_store():
+    """Open the configured chunk store.
+
+    Returns the Postgres+pgvector backend when settings.use_pg (DATABASE_URL
+    set), otherwise the SQLite backend (rag.db). Both expose the same public
+    API (add_book/add_chunks/bm25_search/find_by_refs/book_title/stats/...).
+    """
+    if settings.use_pg:
+        from .pgstore import PgStore
+
+        return PgStore(settings.database_url)
+    return Store(settings.index_dir / "rag.db")
+
+
 class Store:
     """Chunk store: books, chunks and a term-frequency index for BM25."""
 
@@ -153,6 +167,19 @@ class Store:
             "SELECT title FROM books WHERE book_id = ?", (book_id,)
         ).fetchone()
         return row["title"] if row else book_id
+
+    def book_row(self, book_id: str) -> dict | None:
+        """(title, source_pdf) for reindexing, or None."""
+        row = self.conn.execute(
+            "SELECT title, source_pdf FROM books WHERE book_id = ?", (book_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_book_rows(self) -> list[dict]:
+        return [
+            dict(r)
+            for r in self.conn.execute("SELECT book_id, title FROM books ORDER BY book_id")
+        ]
 
     def stats(self) -> dict:
         """Summary of the search index (chunks per book, totals)."""

@@ -43,6 +43,17 @@ HOST                                CONTAINER (study/docker)
   (`init|import|export|status|reset-all|books|topics|docs`), `reindex`.
   Phase functions return a frozen `PhaseReport`-style result and keep only
   `_failed_topics` as hidden state (same-process retry guard).
+- **DB backend** (2026-08): Postgres 17 + pgvector (`db` compose service) when
+  `DATABASE_URL` is set — pg_trgm lexical + HNSW vector in one DB. `DATABASE_URL`
+  empty = legacy SQLite FTS5 (`rag.db`) + Chroma. Both backends expose the same
+  Store interface (`rag.store.open_store()` picks the backend; `rag/pgstore.py`
+  is the Postgres implementation).
+- **Multi-core** (2026-08): `study.py index --jobs N` parses N PDFs concurrently
+  via `multiprocessing` (fork) — parse/chunk run in workers, DB write + embed
+  stay in the single parent (not fork-safe to share SQLite/Chroma/pgvector
+  writers). ~4-6GB RAM per worker.
+- Runtime: Python 3.14 image; dependencies locked in `requirements.lock`
+  (`uv pip compile requirements.txt -o requirements.lock --python-version 3.14`).
 - `rag/llm.py` — pure-ish LLM helpers: `is_healthy`, `wait_healthy`,
   `require_llm` (raises `LLMUnavailable`). Containers cannot exec host
   processes, so they only wait/assert; the start/stop *effects* live in

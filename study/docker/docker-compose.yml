@@ -19,6 +19,11 @@ x-rag-env: &rag-env
   MAX_TOKENS: ${MAX_TOKENS:-4096}
   WATCH_INTERVAL_S: ${WATCH_INTERVAL_S:-300}
   LLM_START_TIMEOUT_S: ${LLM_START_TIMEOUT_S:-180}
+  # Postgres+pgvector backend (empty = SQLite+Chroma fallback).
+  DATABASE_URL: ${DATABASE_URL:-}
+  PG_USER: ${PG_USER:-study}
+  PG_PASSWORD: ${PG_PASSWORD:-study}
+  PG_DB: ${PG_DB:-study}
   OMP_NUM_THREADS: ${OMP_NUM_THREADS:-14}
   VLM_BASE_URL: ${VLM_BASE_URL:-}
   VLM_API_KEY: ${VLM_API_KEY:-}
@@ -36,6 +41,24 @@ x-rag-env: &rag-env
   DOCLING_LAYOUT_PRESET: ${DOCLING_LAYOUT_PRESET:-}
 
 services:
+  # Postgres 17 + pgvector — high-performance Dockerized RAG database
+  # (HNSW vector index + pg_trgm lexical). Host networking -> 127.0.0.1:5432.
+  db:
+    image: pgvector/pgvector:pg17
+    network_mode: host
+    environment:
+      POSTGRES_USER: ${PG_USER:-study}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-study}
+      POSTGRES_DB: ${PG_DB:-study}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${PG_USER:-study} -d $${PG_DB:-study}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   # Functional phase runner (run-once) — driven by study/pipeline.sh:
   #   docker compose run --rm pipeline python tools/study.py <index|generate|prefetch|status>
   pipeline:
@@ -45,6 +68,10 @@ services:
     environment: *rag-env
     command: ["python", "-u", "tools/study.py", "status"]
     restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   hf-cache:
+  pgdata:

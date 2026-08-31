@@ -100,6 +100,17 @@ class Settings:
     chunk_max_chars: int = field(default_factory=lambda: _env_int("CHUNK_MAX_CHARS", 1500))
     chunk_overlap: int = field(default_factory=lambda: _env_int("CHUNK_OVERLAP", 150))
 
+    # --- database (Postgres + pgvector) --------------------------------------
+    # Set DATABASE_URL (e.g. postgresql://study:study@127.0.0.1:5432/study) to
+    # use the Dockerized Postgres+pgvector backend. Empty = SQLite+Chroma
+    # (rag.db + index/chroma) as before.
+    database_url: str = _env("DATABASE_URL", "")
+
+    @property
+    def use_pg(self) -> bool:
+        """True when DATABASE_URL is set (Postgres+pgvector backend)."""
+        return bool(self.database_url)
+
     # --- models -------------------------------------------------------------
     embed_model: str = _env("EMBED_MODEL", "BAAI/bge-m3")
     rerank_model: str = _env("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")

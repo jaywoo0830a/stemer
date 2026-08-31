@@ -63,6 +63,29 @@ def index_book(book_id: str, chunks: list[Chunk], force: bool = False) -> None:
     """
     if not chunks:
         return
+
+    texts = [c.text for c in chunks]
+    ids = [c.chunk_id for c in chunks]
+
+    if settings.use_pg:
+        from .pgstore import PgStore
+
+        pg = PgStore(settings.database_url)
+        if not force and pg.has_embeddings(book_id):
+            log.info("Vectors already present for %s — skipping embedding.", book_id)
+            return
+        # Chunk rows are added by index_one_book / reindex before this call;
+        # add_chunks is idempotent (ON CONFLICT DO NOTHING), so just make sure
+        # they exist, then fill the embedding column.
+        pg.add_chunks(chunks)
+        log.info("Embedding %d chunks for %s ...", len(chunks), book_id)
+        embeddings: list[list[float]] = []
+        for i in tqdm(range(0, len(texts), settings.embed_batch), desc="embed"):
+            embeddings.extend(_embed_batch(texts[i : i + settings.embed_batch]))
+        pg.set_embeddings(book_id, ids, embeddings)
+        return
+
+    # ---- chroma backend (default when DATABASE_URL is unset) ----
     col = get_collection()
 
     existing = col.get(where={"book_id": book_id}, limit=1)
@@ -75,12 +98,10 @@ def index_book(book_id: str, chunks: list[Chunk], force: bool = False) -> None:
     except Exception as exc:  # noqa: BLE001 — delete-by-where may fail on old chroma
         log.warning("Could not clear old vectors for %s: %s", book_id, exc)
 
-    texts = [c.text for c in chunks]
-    ids = [c.chunk_id for c in chunks]
     metas = [c.metadata for c in chunks]
 
     log.info("Embedding %d chunks for %s ...", len(chunks), book_id)
-    embeddings: list[list[float]] = []
+    embeddings = []
     for i in tqdm(range(0, len(texts), settings.embed_batch), desc="embed"):
         embeddings.extend(_embed_batch(texts[i : i + settings.embed_batch]))
 
@@ -98,9 +119,15 @@ def index_book(book_id: str, chunks: list[Chunk], force: bool = False) -> None:
 
 def dense_search(query: str, k: int, book_id: str | None = None) -> list[dict]:
     """Cosine-similarity search, optionally restricted to one book."""
-    col = get_collection()
     model = get_embed_model()
     q = model.encode([query], normalize_embeddings=True, convert_to_numpy=True)
+
+    if settings.use_pg:
+        from .pgstore import PgStore
+
+        return PgStore(settings.database_url).dense_search(q[0].tolist(), k, book_id)
+
+    col = get_collection()
     where = {"book_id": book_id} if book_id else None
     res = col.query(
         query_embeddings=[q[0].tolist()],
