@@ -32,16 +32,18 @@ set -a; source "$ENV_FILE"; set +a
 
 cd "$DOCKER_DIR"
 
-# 이미지가 없으면 빌드. --build 인자로 강제 재빌드 (requirements/Dockerfile 변경 시).
-BUILD_FLAG=""
+# 이미지가 없거나 --build 인자가 있으면 빌드.
+# NOTE: `docker compose build`는 --build 플래그를 받지 않으므로 여기서는
+# (빌드가 필요한지 여부만 판단하고) 실제 호출은 그냥 build pipeline로 합니다.
+NEED_BUILD=""
 if [[ "${1:-}" == "--build" ]]; then
-  BUILD_FLAG="--build"
+  NEED_BUILD=1
 elif ! docker image inspect study-rag:latest >/dev/null 2>&1; then
   echo "ℹ 이미지 없음 — 최초 빌드 시작 (수 분 소요)"
-  BUILD_FLAG="--build"
+  NEED_BUILD=1
 fi
-if [[ -n "$BUILD_FLAG" ]]; then
-  docker compose build $BUILD_FLAG pipeline
+if [[ -n "$NEED_BUILD" ]]; then
+  docker compose build pipeline
 fi
 
 # 파이프라인 watcher (호스트) — WATCHER_ENABLE=on 이면 백그라운드로 기동
