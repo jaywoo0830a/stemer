@@ -190,6 +190,8 @@ class Settings:
     # --- pipeline --------------------------------------------------------------
     watch_interval_s: int = field(default_factory=lambda: _env_int("WATCH_INTERVAL_S", 300))
     katex_lint: str = _env("KATEX_LINT", "on")  # on | off — cheap inline KaTeX policy lint
+    # liveness log interval during a long Docling parse (seconds)
+    parse_heartbeat_s: int = field(default_factory=lambda: _env_int("PARSE_HEARTBEAT_S", 300))
 
     def ensure_dirs(self) -> None:
         for p in (self.books_inbox, self.books_processed, self.books_markdown,

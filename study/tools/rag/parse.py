@@ -6,6 +6,7 @@ never re-parses the PDF (unless --force is used).
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from pathlib import Path
 
@@ -16,8 +17,52 @@ log = logging.getLogger("rag")
 _converter = None
 
 
+class _PageProgressFilter(logging.Filter):
+    """Let only docling's page-progress lines through (rest stays quiet)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return ("Finished converting pages" in msg
+                or "PIPELINE_PROFILING Stage" in msg)
+
+
+_PAGE_PROGRESS_INSTALLED = False
+
+
+def install_page_progress() -> None:
+    """Raise docling's level to DEBUG but surface only per-batch page progress.
+
+    docling logs progress at DEBUG: "Finished converting pages X/N" (paginated
+    pipeline) and "PIPELINE_PROFILING Stage ... pages=[...]" (threaded
+    pipeline). We keep everything else quiet by filtering, so the pipeline log
+    shows page progress without the full DEBUG noise.
+    """
+    global _PAGE_PROGRESS_INSTALLED
+    if _PAGE_PROGRESS_INSTALLED:
+        return
+    _PAGE_PROGRESS_INSTALLED = True
+    logger = logging.getLogger("docling")
+    logger.setLevel(logging.DEBUG)
+    if not any(isinstance(f, _PageProgressFilter) for f in logger.filters):
+        logger.addFilter(_PageProgressFilter())
+
+
+def _pdf_page_count(pdf_path: Path) -> int | None:
+    """Total pages (for progress reporting), or None if it can't be read."""
+    try:
+        import pypdfium2 as pdfium
+
+        pdf = pdfium.PdfDocument(str(pdf_path))
+        n = len(pdf)
+        pdf.close()
+        return n
+    except Exception:
+        return None
+
+
 def get_converter():
     global _converter
+    install_page_progress()  # surface docling's per-batch page progress in the log
     if _converter is None:
         from docling.datamodel.base_models import InputFormat
         from docling.datamodel.pipeline_options import (
@@ -100,8 +145,27 @@ def parse_pdf(pdf_path: Path, force: bool = False) -> str:
         return md_path.read_text(encoding="utf-8")
 
     log.info("Parsing %s with Docling (tens of minutes per book is normal) ...", pdf_path.name)
+    total_pages = _pdf_page_count(pdf_path)
+    if total_pages:
+        log.info("Page progress: %s has %d pages total.", pdf_path.name, total_pages)
     t0 = time.time()
-    result = get_converter().convert(str(pdf_path))
+
+    # Liveness heartbeat: docling is quiet at WARNING, so report elapsed time
+    # every PARSE_HEARTBEAT_S so the log never goes silent during a long parse.
+    _stop = threading.Event()
+
+    def _beat() -> None:
+        while not _stop.wait(settings.parse_heartbeat_s):
+            log.info(
+                "Still parsing %s — %.0f min elapsed (page progress above).",
+                pdf_path.name, (time.time() - t0) / 60,
+            )
+
+    threading.Thread(target=_beat, daemon=True).start()
+    try:
+        result = get_converter().convert(str(pdf_path))
+    finally:
+        _stop.set()
     md = result.document.export_to_markdown()
     md_path.write_text(md, encoding="utf-8")
     if settings.figures_enabled.lower() != "off":
