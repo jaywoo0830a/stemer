@@ -21,10 +21,17 @@ RUN apt-get update \
 # downstream packages reuse them. Installing both in one call keeps their
 # versions in sync — mixing PyPI's CUDA-built torchvision with CPU torch
 # breaks with "operator torchvision::nms does not exist".
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# Versions are pinned to requirements.lock (regenerate via
+# `uv pip compile requirements.txt -o requirements.lock --python-version 3.11`).
+RUN pip install --no-cache-dir \
+        torch==2.13.0 torchvision==0.28.0 \
+        --index-url https://download.pytorch.org/whl/cpu
 
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+# Install the FULL locked dependency set (reproducible — every rebuild installs
+# the exact same versions, no drift). requirements.txt is the human-editable
+# source; requirements.lock is what actually gets installed.
+COPY requirements.lock /tmp/requirements.lock
+RUN pip install --no-cache-dir -r /tmp/requirements.lock
 
 # /data is the mounted study/ directory (see docker-compose.yml).
 WORKDIR /data

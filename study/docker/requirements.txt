@@ -3,6 +3,12 @@
 # formula-enrichment model. The standard extra ships the new `rapidocr`
 # package for OCR — the legacy rapidocr-onnxruntime package is obsolete.
 docling[vlm]==2.123.1
+# Transformers: docling allows >=4.42,<6.0 (excluding 5.0-5.3), but the
+# CodeFormulaV2 formula VLM is Idefics3/SmolVLM-based and needs the newer
+# `create_causal_mask(..., cache_position=...)` signature (added in 4.49).
+# Floor at >=4.49; `uv pip compile` (see requirements.lock) locks the newest
+# compatible version so every Docker rebuild is reproducible.
+transformers>=4.49.0
 chromadb>=0.5.5
 sentence-transformers>=3.0.0
 httpx>=0.27.0
