@@ -176,8 +176,13 @@ def build_solution_messages(
     section_refs: str,
     hits: list[Hit],
     problems_text: str,
+    exam: bool = False,
 ) -> list[dict]:
-    """Prompt for full step-by-step solutions to a generated problem set."""
+    """Prompt for full step-by-step solutions to a generated problem set.
+
+    exam=True uses three-tier solution headings (Basic / Intermediate / Advanced)
+    to match the exam study guide; otherwise the classic two-tier headings.
+    """
     agents_md = _doc_content("agents", settings.agents_file, _DEFAULT_AGENTS)
     system = (
         "You are an expert writer of textbook solutions. Follow the AGENTS rules"
@@ -185,18 +190,97 @@ def build_solution_messages(
         "<AGENTS>\n" + agents_md + "\n</AGENTS>\n\n"
         "Output ONLY the solutions as Markdown."
     )
+    if exam:
+        headings = (
+            "under the headings '## Solutions to Basic Problems',"
+            " '## Solutions to Intermediate Problems' and"
+            " '## Solutions to Advanced Problems'"
+        )
+    else:
+        headings = (
+            "under the headings '## Solutions to Basic Problems' and"
+            " '## Solutions to Intermediate / Advanced Problems'"
+        )
     user = (
         f"Below is a practice problem set for the topic '{topic}'"
         f" (book: {book_title}, sections: {section_refs or '(not specified)'}).\n\n"
         f"Write a COMPLETE step-by-step solution for EVERY problem, numbered to"
-        f" match the problem set, under the headings '## Solutions to Basic Problems'"
-        f" and '## Solutions to Intermediate / Advanced Problems'.\n"
+        f" match the problem set, {headings}.\n"
         f"Use the methods and notation from the excerpts — do not introduce"
         f" techniques that are not in them. End each solution with the final answer"
         f" boxed in plain text as: Answer: ...\n\n"
         f"<PROBLEMS>\n{problems_text}\n</PROBLEMS>\n\n"
         f"<EXCERPTS>\n{_excerpt_block(hits) or '(no excerpts available)'}\n</EXCERPTS>\n\n"
         f"Write the solutions now."
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
+def build_exam_messages(
+    topic: str,
+    book_title: str,
+    book_id: str,
+    section_refs: str,
+    hits: list[Hit],
+) -> list[dict]:
+    """Prompt for an exam-prep STUDY GUIDE (learning companion, not a textbook).
+
+    Sections: Goal -> Core Concepts -> Worked Recipe -> Applications ->
+    Archetype Problems (with solutions) -> Practice Problems (solutions in a
+    second call via build_solution_messages).
+    """
+    agents_md = _doc_content("agents", settings.agents_file, _DEFAULT_AGENTS)
+    n_arch = settings.exam_archetypes
+    n_basic = settings.exam_basic
+    n_inter = settings.exam_intermediate
+    n_adv = settings.exam_advanced
+    system = (
+        "You are an expert writer of engineering exam-prep study guides. Follow"
+        " the AGENTS rules below EXACTLY (language, KaTeX, textbook-first, no"
+        " deep proofs). Output ONLY the guide as Markdown — no commentary."
+        "\n\n<AGENTS>\n" + agents_md + "\n</AGENTS>\n"
+    )
+    user = (
+        f"Write a dense exam-prep study guide for this topic — a learning"
+        f" companion, not a math textbook.\n\n"
+        f"Topic: {topic}\n"
+        f"Book: {book_title} (book_id: {book_id})\n"
+        f"Primary textbook sections: {section_refs or '(not specified)'}\n\n"
+        "Structure — EXACTLY these sections:\n\n"
+        "## 1. Goal\n"
+        "- One line: what you can do after this module.\n\n"
+        "## 2. Core Concepts\n"
+        "- For each concept: definition -> key formulas (KaTeX) -> EXACT"
+        " conditions/assumptions -> one-line intuition -> common mistake / exam tip.\n"
+        "- No derivations; link each concept to its textbook section (e.g. see §11.3).\n"
+        "- Dense and skimmable: tables/bullets, ~half a page per major idea.\n\n"
+        "## 3. Worked Recipe\n"
+        "- Step-by-step procedures for the exam-relevant tasks, with the decision"
+        " order and exact conditions at each step (e.g. 'to test convergence:"
+        " 1) n-th term test, 2) geometric/p-series, 3) ratio/root, ...').\n\n"
+        "## 4. Applications\n"
+        "- For each major concept, 1-2 engineering applications (signal"
+        " processing, numerical analysis, probability, ODEs, ...) with a concrete example.\n\n"
+        "## 5. Archetype Problems\n"
+        f"- EXACTLY {n_arch} representative problem types that recur on exams"
+        " (between 4 and 8), EACH with a short worked solution (standard method"
+        " only, no extra commentary).\n\n"
+        "## 6. Practice Problems\n"
+        f"- EXACTLY {n_basic} BASIC problems (single-step) under '### Basic'.\n"
+        f"- EXACTLY {n_inter} INTERMEDIATE problems (multi-step) under"
+        " '### Intermediate'.\n"
+        f"- EXACTLY {n_adv} ADVANCED problems (multi-step, more involved) under"
+        " '### Advanced'.\n"
+        f"- Number them 1..{n_basic}, 1..{n_inter} and 1..{n_adv}.\n"
+        "- Use ONLY notation/methods from the excerpts; every problem must be"
+        " solvable with the mapped sections.\n"
+        "- Do NOT include solutions for the practice problems (a separate"
+        " Solutions part follows).\n\n"
+        "<EXCERPTS>\n" + (_excerpt_block(hits) or "(no excerpts available)") + "\n</EXCERPTS>\n\n"
+        "Write the guide now."
     )
     return [
         {"role": "system", "content": system},
@@ -299,3 +383,42 @@ def save_problem_set(
             if lint_problems:
                 log.warning("KaTeX lint issues in %s: %s", path.name, "; ".join(lint_problems))
     return problems_path, solutions_path
+
+
+def save_exam(
+    topic: str,
+    book_id: str,
+    section_refs: str,
+    guide_text: str,
+    solutions_text: str,
+    out_base: str | None = None,
+) -> Path:
+    """Save an exam-prep guide as ONE file: concepts + problems + solutions.
+
+    Written to study/exam/<slug>.md by default (or out_base when given).
+    """
+    slug = slugify(topic)
+    path = Path(out_base) if out_base else (settings.exam_dir / f"{slug}.md")
+    if not path.is_absolute():
+        path = settings.study_root / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    today = dt.date.today().isoformat()
+    frontmatter = (
+        f"---\ntopic: {topic}\nbook: {book_id}\nsections: {section_refs}\n"
+        f"status: draft\ngenerated: {today}\nkind: exam\n---\n\n"
+    )
+    body = (
+        f"# {topic} — exam prep\n\n"
+        + guide_text.strip()
+        + "\n\n---\n\n# Solutions\n\n"
+        + solutions_text.strip()
+        + "\n"
+    )
+    path.write_text(frontmatter + body, encoding="utf-8")
+
+    if settings.katex_lint.lower() != "off":
+        problems = lint_katex(guide_text) + lint_katex(solutions_text)
+        if problems:
+            log.warning("KaTeX lint issues in %s: %s", path.name, "; ".join(problems))
+    return path

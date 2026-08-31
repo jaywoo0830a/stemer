@@ -187,10 +187,11 @@ def cmd_status(_args) -> int:
     inbox = sorted(settings.books_inbox.glob("*.pdf"))
     notes = sorted(settings.notes_dir.glob("*.md")) if settings.notes_dir.exists() else []
     problems = sorted(settings.problems_dir.glob("*.md")) if settings.problems_dir.exists() else []
+    exams = sorted(settings.exam_dir.glob("*.md")) if settings.exam_dir.exists() else []
     print()
     print("=== progress ===")
     print(f"inbox PDFs: {len(inbox)}" + ("  " + ", ".join(p.name for p in inbox) if inbox else ""))
-    print(f"notes: {len(notes)} | problems: {len(problems)}")
+    print(f"notes: {len(notes)} | problems: {len(problems)} | exam: {len(exams)}")
 
     pending_index, pending_generate = count_pending()
     print(f"pending_index={pending_index} pending_generate={pending_generate}")
@@ -234,7 +235,8 @@ def cmd_reset_all(args) -> int:
 
     # Wipe derived state: parse cache, index, figures, notes, problems, logs.
     for p in (settings.index_dir, settings.books_markdown, settings.figures_dir,
-              settings.notes_dir, settings.problems_dir, settings.logs_dir):
+              settings.notes_dir, settings.problems_dir, settings.exam_dir,
+              settings.logs_dir):
         if p.exists():
             shutil.rmtree(p) if p.is_dir() else p.unlink()
 
@@ -444,9 +446,10 @@ def generate_pending(store: Store, only_book: str | None = None, max_topics: int
         log.info("Generating note for '%s' (book=%s, section=%s) ...", row.topic, row.book, row.section)
         try:
             refs = [s.strip() for s in re.split(r"[,;]", row.section) if s.strip()]
-            # problems kind pulls a larger primary set so the theory section AND
-            # its exercise blocks ("1.5 Exercises") both reach the prompt.
-            primary_limit = 12 if row.kind == "problems" else 8
+            # problems/exam kinds pull a larger primary set so the theory
+            # section AND its exercise blocks ("1.5 Exercises") both reach the
+            # prompt.
+            primary_limit = 12 if row.kind in ("problems", "exam") else 8
             primary = primary_sections(store, row.topic, refs, row.book, limit=primary_limit)
             cross = retrieve(store, row.topic, book_id=row.book)
             ids = {h.chunk_id for h in primary}
@@ -472,6 +475,19 @@ def generate_pending(store: Store, only_book: str | None = None, max_topics: int
                 )
                 mark_topic(row.topic, "draft")
                 log.info("Saved %s and %s; TOPICS.md status -> draft.", p_out, s_out)
+            elif row.kind == "exam":
+                messages = generate.build_exam_messages(row.topic, title, row.book, row.section, hits)
+                guide_text = generate.call_llama(messages)
+                messages = generate.build_solution_messages(
+                    row.topic, title, row.book, row.section, hits, guide_text, exam=True
+                )
+                solutions_text = generate.call_llama(messages)
+                out = generate.save_exam(
+                    row.topic, row.book, row.section, guide_text, solutions_text,
+                    out_base=row.note or None,
+                )
+                mark_topic(row.topic, "draft")
+                log.info("Saved %s (exam); TOPICS.md status -> draft.", out)
             else:
                 messages = generate.build_messages(row.topic, title, row.book, row.section, hits)
                 content = generate.call_llama(messages)
@@ -608,16 +624,22 @@ def cmd_note(args) -> int:
         print(f"Saved: {p_out}\nSaved: {s_out}")
         return 0
 
-    messages = generate.build_messages(args.topic, title, book or "-", section, hits)
-    print(
-        f"Retrieved {len(hits)} chunks ({len(primary)} primary + {len(cross)} cross-reference).\n"
-        f"Calling llama-server (effort={settings.reasoning_effort}, max_tokens={settings.max_tokens}) ..."
+    # Default: the exam-prep STUDY GUIDE (concepts + recipe + applications +
+    # archetypes + practice + solutions in ONE file) — see study/exam/.
+    messages = generate.build_exam_messages(args.topic, title, book or "-", section, hits)
+    print(f"Retrieved {len(hits)} chunks. Generating study guide (call 1/2) ...")
+    guide_text = generate.call_llama(messages)
+    messages = generate.build_solution_messages(
+        args.topic, title, book or "-", section, hits, guide_text, exam=True
     )
-    content = generate.call_llama(messages)
-    path = generate.save_note(args.topic, book or "-", section, content, out_path=out)
+    print("Generating solutions (call 2/2) ...")
+    solutions_text = generate.call_llama(messages)
+    out = generate.save_exam(
+        args.topic, book or "-", section, guide_text, solutions_text, out_base=out
+    )
     if args.update_topics and row:
         mark_topic(args.topic, "draft")
-    print(f"Saved: {path}")
+    print(f"Saved: {out}")
     return 0
 
 
@@ -693,8 +715,9 @@ def main() -> None:
     ta.add_argument("--section", default="")
     ta.add_argument("--note", default="")
     from rag import registry as _reg
-    ta.add_argument("--kind", default="note", choices=_reg.KINDS,
-                    help="note = concept note, problems = 10+10 problem set with solutions")
+    ta.add_argument("--kind", default="exam", choices=_reg.KINDS,
+                    help="exam = study guide (개념+레시피+응용+유형+문제+해설, 권장) |"
+                         " note = concept note | problems = 10+10 problem set")
     tl = tsub.add_parser("list", help="list topics")
     tl.add_argument("--status", default=None, choices=_reg.STATUSES)
     tl.add_argument("--book", default=None)

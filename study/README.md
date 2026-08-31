@@ -186,9 +186,12 @@ python tools/study.py init
 # 교재 등록
 python tools/study.py books add prob --title "Introduction to Probability" --author "Blitzstein"
 
-# 주제 등록 (자동으로 todo 상태 + TOPICS.md 재생성)
+# 주제 등록 — 기본 kind = exam (학습서: 개념+레시피+응용+대표유형+연습문제+해설 한 파일, study/exam/)
 python tools/study.py topics add "Normal distribution" --book prob --section 3.5
+python tools/study.py topics add "Series convergence" --book prob --section "11.3, 11.4, 11.5"
+# 기존 kind (필요 시 명시)
 python tools/study.py topics add "ODE practice" --book prob --section 1.5 --kind problems   # 기초10+중급10 + 풀이 별도
+python tools/study.py topics add "ODE notes" --book prob --section 1.5 --kind note          # 개념 노트
 
 # 조회 / 상태 변경
 python tools/study.py topics list --status todo

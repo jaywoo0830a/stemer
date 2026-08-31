@@ -71,6 +71,11 @@ class Settings:
         return self.study_root / "problems"
 
     @property
+    def exam_dir(self) -> Path:
+        """Exam-prep study guides (concepts + problems + solutions in one file)."""
+        return self.study_root / "exam"
+
+    @property
     def logs_dir(self) -> Path:
         return self.study_root / "logs"
 
@@ -124,6 +129,12 @@ class Settings:
     # --- problem sets ----------------------------------------------------------
     problems_basic: int = field(default_factory=lambda: _env_int("PROBLEMS_BASIC", 10))
     problems_advanced: int = field(default_factory=lambda: _env_int("PROBLEMS_ADVANCED", 10))
+
+    # --- exam study guide --------------------------------------------------------
+    exam_archetypes: int = field(default_factory=lambda: _env_int("EXAM_ARCHETYPES", 5))
+    exam_basic: int = field(default_factory=lambda: _env_int("EXAM_BASIC", 8))
+    exam_intermediate: int = field(default_factory=lambda: _env_int("EXAM_INTERMEDIATE", 8))
+    exam_advanced: int = field(default_factory=lambda: _env_int("EXAM_ADVANCED", 4))
 
     # --- figures / VLM -----------------------------------------------------------
     figures_enabled: str = _env("FIGURES_ENABLED", "on")   # on | off
@@ -182,7 +193,8 @@ class Settings:
 
     def ensure_dirs(self) -> None:
         for p in (self.books_inbox, self.books_processed, self.books_markdown,
-                  self.index_dir, self.notes_dir, self.problems_dir, self.logs_dir):
+                  self.index_dir, self.notes_dir, self.problems_dir, self.exam_dir,
+                  self.logs_dir):
             p.mkdir(parents=True, exist_ok=True)
 
 

@@ -22,7 +22,7 @@ from .config import settings
 log = logging.getLogger("rag")
 
 STATUSES = ("todo", "draft", "review", "done")
-KINDS = ("note", "problems")
+KINDS = ("note", "problems", "exam")  # exam = concepts + problems + solutions in one file
 
 _ROW_RE = re.compile(
     r"^\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*$"
