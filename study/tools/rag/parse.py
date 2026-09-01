@@ -17,34 +17,42 @@ log = logging.getLogger("rag")
 _converter = None
 
 
-class _PageProgressFilter(logging.Filter):
-    """Let only docling's page-progress lines through (rest stays quiet)."""
+class _DoclingProgressFilter(logging.Filter):
+    """Keep docling's page/VLM progress lines; drop the rest of its DEBUG noise.
+
+    Attached to the ROOT handlers — logger-level filters are NOT consulted
+    during propagation, so they can't be used here. Non-docling (rag) records
+    pass through untouched.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
+        if not record.name.startswith("docling"):
+            return True
         msg = record.getMessage()
         return ("Finished converting pages" in msg
-                or "PIPELINE_PROFILING Stage" in msg)
+                or "PIPELINE_PROFILING Stage" in msg
+                or "Batch processed" in msg)
 
 
 _PAGE_PROGRESS_INSTALLED = False
 
 
 def install_page_progress() -> None:
-    """Raise docling's level to DEBUG but surface only per-batch page progress.
+    """Surface docling's per-batch page + VLM progress in the pipeline log.
 
-    docling logs progress at DEBUG: "Finished converting pages X/N" (paginated
-    pipeline) and "PIPELINE_PROFILING Stage ... pages=[...]" (threaded
-    pipeline). We keep everything else quiet by filtering, so the pipeline log
-    shows page progress without the full DEBUG noise.
+    Raises docling to DEBUG so its progress lines are emitted, then filters at
+    the ROOT handlers to keep only: per-batch page progress (page X/N, threaded
+    stage batches) and VLM enrichment batches ("Batch processed N images ...").
+    Everything else from docling stays hidden; our own rag logs pass through.
     """
     global _PAGE_PROGRESS_INSTALLED
     if _PAGE_PROGRESS_INSTALLED:
         return
     _PAGE_PROGRESS_INSTALLED = True
-    logger = logging.getLogger("docling")
-    logger.setLevel(logging.DEBUG)
-    if not any(isinstance(f, _PageProgressFilter) for f in logger.filters):
-        logger.addFilter(_PageProgressFilter())
+    logging.getLogger("docling").setLevel(logging.DEBUG)
+    for handler in logging.getLogger().handlers:
+        if not any(isinstance(f, _DoclingProgressFilter) for f in handler.filters):
+            handler.addFilter(_DoclingProgressFilter())
 
 
 def _pdf_page_count(pdf_path: Path) -> int | None:
