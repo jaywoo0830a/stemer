@@ -29,7 +29,11 @@ python3 -m pytest -q        # 계약(contract) 테스트 — 호스트에서 무
 - `study_lib.render` — 검증된 payload → 최종 마크다운 (구조·라벨·번호는 템플릿 소유) (Slice 8)
 - `study_lib.figures` — FigureRegistry(교재 원본만)·figures_for(섹션)·attach_figures (Slice 9)
 - `study_lib.factory` — generate_one: retrieve→prompt→llm→검증→patch(≤2)→render→저장→draft (Slice 10)
-- `study_lib.cli` — 얇은 CLI 래퍼: books/topics/status/index/generate (Slice 11)
+- `study_lib.ingest` — 폴더 배치 인제스트: 등록→파싱→청킹→임베딩→저장, 재개/실패 관리, `--jobs N` 병렬 (Slice 12)
+- `study_lib.discover` — 인덱스 섹션 → 자동 todo 토픽 (`topics discover --book`) (Slice 13)
+- `study_lib.lint` — KaTeX 린트(금지 env/매크로), factory 생성물에 자동 적용
+- `study_lib.profiles` — 청크 프로필 레지스트리(compact/long) → 책 단위 연결
+- `study_lib.cli` — 얇은 CLI 래퍼: books/topics/status/index/ingest/generate (Slice 11)
 - `study_lib.tokens` — 공용 토큰 추정 척도
 
 ## CLI
@@ -40,4 +44,9 @@ python -m study_lib.cli topics add --book calc --title "Limit of a sequence" --s
 python -m study_lib.cli index book.md --book calc --profile text --embedder stub
 python -m study_lib.cli status
 python -m study_lib.cli generate --book calc
+
+# 사전 준비 — PDF 폴더 일괄 인제스트 (스킵/재시도/병렬)
+python -m study_lib.cli ingest books/math --subject math --profile fast --jobs 4
+# 인덱스된 책의 섹션에서 토픽 자동 생성 → generate 로 직결
+python -m study_lib.cli topics discover --book calc
 ```

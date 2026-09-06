@@ -50,6 +50,7 @@ class Book:
     source: str = ""
     chunk_profile: str | None = None
     status: str = PENDING
+    error: str = ""
     added_at: str = field(default_factory=_now)
 
 
@@ -153,6 +154,13 @@ class Library:
             raise ValueError(f"invalid book status {status!r}; expected {VALID_BOOK_STATUS}")
         book = self.book(book_id)
         book.status = status
+        return book
+
+    def set_book_error(self, book_id: str, message: str) -> Book:
+        """인제스트 실패 마킹 — 상태 failed + 사유 기록 (재시도 가능)."""
+        book = self.book(book_id)
+        book.status = FAILED
+        book.error = message
         return book
 
     # ---- 토픽 ----

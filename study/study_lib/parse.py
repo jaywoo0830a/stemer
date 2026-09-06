@@ -23,6 +23,7 @@ class ParsedBook:
     parser: str
     pages: int | None = None
     source: str = ""
+    figures: tuple = ()   # docling 등에서 추출된 Figure 목록 (없으면 빈 튜플)
 
 
 class Parser(Protocol):
@@ -91,6 +92,15 @@ PARSER_PROFILES: dict[str, type[Parser]] = {
 }
 
 _EXT_DEFAULT = {".txt": "text", ".md": "text", ".pdf": "fast"}
+
+MIN_CHARS_PER_PAGE = 150
+
+
+def detect_scanned(parsed: ParsedBook, min_chars_per_page: int = MIN_CHARS_PER_PAGE) -> bool:
+    """페이지 수 대비 추출 텍스트가 너무 적으면 스캔본 의심 (품질 게이트)."""
+    if parsed.pages is None or parsed.pages <= 0:
+        return False
+    return len(parsed.markdown.strip()) < min_chars_per_page * parsed.pages
 
 
 def get_parser(name: str) -> Parser:

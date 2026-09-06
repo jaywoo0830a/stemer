@@ -85,3 +85,18 @@ def attach_figures(markdown: str, figures: list[Figure]) -> str:
             lines.append(f"*(source: {fig.book_id}, p.{fig.page})*")
         lines.append("")
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def register_parsed_figures(registry: FigureRegistry, figures, book_id: str) -> int:
+    """파싱 결과 그림을 레지스트리에 등록 (책 귀속, 중복 skip). 몇 개 추가됐는지 반환."""
+    added = 0
+    existing_ids = {f.fig_id for f in registry.figures()}
+    for i, fig in enumerate(figures):
+        fig_id = fig.fig_id or f"{book_id}-{i}"
+        if fig_id in existing_ids:
+            continue
+        registry.add(Figure(fig_id=fig_id, book_id=book_id, section=fig.section,
+                            path=fig.path, caption=fig.caption, page=fig.page))
+        existing_ids.add(fig_id)
+        added += 1
+    return added

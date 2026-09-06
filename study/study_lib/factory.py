@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .figures import attach_figures
+from .lint import lint_katex
 from .llm import LLMClient, Usage
 from .protocol import Schema, validate
 from .registry import DRAFT, Library
@@ -41,6 +42,7 @@ class GenerateResult:
     retries: int = 0            # 실제 patch 재요청 횟수
     usage: Usage = field(default_factory=Usage)
     issues: tuple[str, ...] = ()
+    lint_warnings: tuple[str, ...] = ()
 
 
 def _describe_kind(schema: Schema, kind: str) -> str:
@@ -117,7 +119,8 @@ def generate_one(topic: object, *, library: Library, store: object,
                  embedder: object, llm: LLMClient, schema: Schema, guide: str,
                  figures=None, notes_dir: str | Path = "notes",
                  reranker=None, n_crossref: int = 5,
-                 max_patch: int = 2, max_tokens: int | None = None) -> GenerateResult:
+                 max_patch: int = 2, lint: bool = True,
+                 max_tokens: int | None = None) -> GenerateResult:
     """클라이언트 진입점 — 토픽 1건을 생성해 draft 노트로 저장한다."""
     subject = topic.subject
     kind = topic.kind
@@ -162,6 +165,11 @@ def generate_one(topic: object, *, library: Library, store: object,
         figs = figures.figures_for(topic.book_id, topic.section or "")
         markdown = attach_figures(markdown, figs)
 
+    warnings: tuple[str, ...] = ()
+    if lint:
+        warnings = tuple(f"L{issue.line}: {issue.message}"
+                         for issue in lint_katex(markdown))
+
     path = Path(notes_dir) / f"{topic.topic_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(markdown, encoding="utf-8")
@@ -171,4 +179,5 @@ def generate_one(topic: object, *, library: Library, store: object,
 
     return GenerateResult(topic_id=topic.topic_id, status="draft",
                           note_path=str(path), payload=payload,
-                          attempts=attempts, retries=retries, usage=usage)
+                          attempts=attempts, retries=retries, usage=usage,
+                          lint_warnings=warnings)

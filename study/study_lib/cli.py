@@ -20,13 +20,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .chunk import chunk_markdown
+from .discover import discover_topics
 from .embed import StubEmbedder, TransformerEmbedder
 from .factory import generate_one
+from .ingest import ingest_dir
 from .llm import FlashClient, LLMError
 from .parse import parse_source
+from .profiles import load_profile, profile_names
 from .protocol import load_schema
 from .registry import INDEXED, JsonFileStore, Library
 from .store import IndexStore, JsonDurableSink
+from .subjects import SUBJECTS
 
 
 @dataclass
@@ -55,7 +59,8 @@ def _resolve_embedder(kind: str):
 # ---- books ----
 def _books_add(ws: Workspace, args) -> int:
     lib = ws.library()
-    lib.add_book(args.id, args.title, args.subject, source=args.source or "")
+    lib.add_book(args.id, args.title, args.subject, source=args.source or "",
+                 chunk_profile=args.chunk_profile)
     lib.save()
     print(f"added book {args.id}")
     return 0
@@ -93,6 +98,18 @@ def _topics_set(ws: Workspace, args) -> int:
     return 0
 
 
+def _topics_discover(ws: Workspace, args) -> int:
+    lib = ws.library()
+    store = ws.open_store()
+    store.load_all()
+    report = discover_topics(args.book, library=lib, store=store, kind=args.kind)
+    for tid in report.added:
+        t = lib.topic(tid)
+        print(f"added topic {t.topic_id} ({t.section}) {t.title}")
+    print(report.summary())
+    return 0
+
+
 # ---- status ----
 def _status(ws: Workspace, args) -> int:
     lib = ws.library()
@@ -121,6 +138,24 @@ def _index(ws: Workspace, args) -> int:
     pages = parsed.pages if parsed.pages is not None else "-"
     print(f"indexed {args.book}: {len(chunks)} chunks (parser={parsed.parser}, pages={pages})")
     return 0
+
+
+# ---- ingest (폴더 배치) ----
+def _ingest(ws: Workspace, args) -> int:
+    spec = ("stub",) if args.embedder == "stub" else ("auto",)
+    chunk_profile = load_profile(args.chunk_profile) if args.chunk_profile else None
+    report = ingest_dir(args.directory, library=ws.library(), store=ws.open_store(),
+                        subject=args.subject, profile=args.profile,
+                        embedder_spec=spec, force=args.force, jobs=args.jobs,
+                        chunk_profile=chunk_profile)
+    for r in report.ingested:
+        print(f"ingested {r.book_id}: {r.chunks} chunks (parser={r.parser})")
+    for bid in report.skipped:
+        print(f"skip     {bid} (already indexed)")
+    for r in report.failed:
+        print(f"failed   {r.book_id}: {r.error}", file=sys.stderr)
+    print(report.summary())
+    return 1 if report.failed else 0
 
 
 # ---- generate ----
@@ -193,6 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--title", required=True)
     pa.add_argument("--subject", required=True)
     pa.add_argument("--source")
+    pa.add_argument("--chunk-profile", choices=list(profile_names()))
     pa.set_defaults(func=_books_add)
     pl = bs.add_parser("list", parents=[common])
     pl.set_defaults(func=_books_list)
@@ -215,6 +251,12 @@ def build_parser() -> argparse.ArgumentParser:
                       choices=["todo", "draft", "review", "done"])
     tset.set_defaults(func=_topics_set)
 
+    td = ts.add_parser("discover", parents=[common])
+    td.add_argument("--book", required=True)
+    td.add_argument("--kind", default="exam",
+                    choices=["exam", "note", "problems"])
+    td.set_defaults(func=_topics_discover)
+
     st = subp("status")
     st.set_defaults(func=_status)
 
@@ -223,6 +265,15 @@ def build_parser() -> argparse.ArgumentParser:
     ix.add_argument("--book", required=True)
     ix.add_argument("--profile", choices=["text", "fast", "docling"])
     ix.set_defaults(func=_index)
+
+    ing = subp("ingest")
+    ing.add_argument("directory")
+    ing.add_argument("--subject", default="math", choices=list(SUBJECTS))
+    ing.add_argument("--profile", choices=["text", "fast", "docling"])
+    ing.add_argument("--jobs", type=int, default=1)
+    ing.add_argument("--chunk-profile", choices=list(profile_names()))
+    ing.add_argument("--force", action="store_true")
+    ing.set_defaults(func=_ingest)
 
     gen = subp("generate")
     gen.add_argument("--book")

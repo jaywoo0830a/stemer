@@ -221,3 +221,96 @@ class IndexStore:
             by_book[c.book_id] = by_book.get(c.book_id, 0) + 1
         return IndexStats(books=len(by_book), chunks=sum(by_book.values()),
                           by_book=by_book)
+
+
+# ---- pgvector 영속 어댑터 (선택: psycopg + pgvector) ----
+
+
+def _vec_from_text(text: str) -> tuple[float, ...]:
+    inner = text.strip().strip("[]")
+    if not inner:
+        return ()
+    return tuple(float(x) for x in inner.split(","))
+
+
+def pg_create_sql(table: str, dim: int = 1024) -> str:
+    return (
+        f"CREATE TABLE IF NOT EXISTS {table} ("
+        f"chunk_id TEXT PRIMARY KEY, book_id TEXT NOT NULL, "
+        f"section TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, "
+        f"seq INT NOT NULL DEFAULT 0, vector vector({dim}) NOT NULL);"
+        f"CREATE INDEX IF NOT EXISTS {table}_book_idx ON {table}(book_id);"
+        f"CREATE INDEX IF NOT EXISTS {table}_vec_idx ON {table} "
+        f"USING hnsw (vector vector_cosine_ops);"
+    )
+
+
+def pg_upsert_sql(table: str) -> str:
+    return (
+        f"INSERT INTO {table} (chunk_id, book_id, section, text, seq, vector) "
+        f"VALUES (%s, %s, %s, %s, %s, %s::vector) "
+        f"ON CONFLICT (chunk_id) DO UPDATE SET book_id=EXCLUDED.book_id, "
+        f"section=EXCLUDED.section, text=EXCLUDED.text, seq=EXCLUDED.seq, "
+        f"vector=EXCLUDED.vector"
+    )
+
+
+def pg_read_sql(table: str) -> str:
+    return (f"SELECT chunk_id, book_id, section, text, seq, vector::text "
+            f"FROM {table} WHERE book_id = %s ORDER BY seq")
+
+
+def pg_book_ids_sql(table: str) -> str:
+    return f"SELECT DISTINCT book_id FROM {table} ORDER BY book_id"
+
+
+def pg_delete_book_sql(table: str) -> str:
+    return f"DELETE FROM {table} WHERE book_id = %s"
+
+
+class PgDurableSink:
+    """pgvector 영속 어댑터 — DurableSink 인터페이스 (선택 의존성)."""
+
+    def __init__(self, dsn: str, *, table: str = "chunks", dim: int = 1024) -> None:
+        try:
+            import psycopg  # noqa: F401
+        except ImportError:
+            raise RuntimeError(
+                "PgDurableSink needs psycopg: pip install 'psycopg[binary]'"
+            ) from None
+        self._dsn = dsn
+        self._table = table
+        self._dim = dim
+
+    def _connect(self):
+        import psycopg
+        return psycopg.connect(self._dsn)
+
+    def write(self, book_id: str, chunks: list[IndexedChunk]) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(pg_create_sql(self._table, self._dim))
+                cur.execute(pg_delete_book_sql(self._table), (book_id,))
+                rows = [(c.chunk_id, c.book_id, c.section, c.text, c.seq,
+                         list(c.vector)) for c in chunks]
+                cur.executemany(pg_upsert_sql(self._table), rows)
+
+    def read(self, book_id: str) -> list[IndexedChunk]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(pg_read_sql(self._table), (book_id,))
+                return [IndexedChunk(chunk_id=r[0], book_id=r[1], section=r[2],
+                                     text=r[3], seq=r[4],
+                                     vector=_vec_from_text(r[5]))
+                        for r in cur.fetchall()]
+
+    def book_ids(self) -> list[str]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(pg_book_ids_sql(self._table))
+                return [r[0] for r in cur.fetchall()]
+
+    def delete(self, book_id: str) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(pg_delete_book_sql(self._table), (book_id,))
