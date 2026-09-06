@@ -47,6 +47,29 @@ class Reranker(Protocol):
     def score(self, query: str, documents: Sequence[str]) -> list[float]: ...
 
 
+class CrossEncoderReranker:
+    """bge-reranker 계열 교차 인코더 — sentence-transformers(선택 의존성).
+
+    클라이언트 관점:
+        retrieve(topic, ..., reranker=CrossEncoderReranker())
+    """
+
+    def __init__(self, model: str = "BAAI/bge-reranker-v2-m3",
+                 *, device: str | None = None) -> None:
+        try:
+            from sentence_transformers import CrossEncoder  # type: ignore
+        except ImportError:
+            raise RuntimeError(
+                "CrossEncoderReranker needs 'sentence-transformers': "
+                "pip install -r requirements-embed.txt"
+            ) from None
+        self._ce = CrossEncoder(model, device=device)
+
+    def score(self, query: str, documents: Sequence[str]) -> list[float]:
+        pairs = [(query, doc) for doc in documents]
+        return [float(s) for s in self._ce.predict(pairs)]
+
+
 def _wanted_sections(section: str | None) -> set[str]:
     if not section:
         return set()

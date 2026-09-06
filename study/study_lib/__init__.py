@@ -16,7 +16,8 @@ from .parse import ParsedBook, get_parser, parse_source
 from .profiles import load_profile, profile_names
 from .registry import Book, Library, Topic
 from .render import render_guide
-from .retrieve import Reranker, RetrievedChunk, RetrievedContext, rerank_top, retrieve
+from .retrieve import (CrossEncoderReranker, Reranker, RetrievedChunk,
+                       RetrievedContext, rerank_top, retrieve)
 from .store import (IndexStore, IndexedChunk, JsonDurableSink, PgDurableSink,
                     pg_create_sql, pg_delete_book_sql, pg_read_sql, pg_upsert_sql)
 
@@ -37,7 +38,8 @@ __all__ = [
     "load_profile", "profile_names",
     "Book", "Library", "Topic",
     "render_guide",
-    "Reranker", "RetrievedChunk", "RetrievedContext", "rerank_top", "retrieve",
+    "Reranker", "CrossEncoderReranker", "RetrievedChunk", "RetrievedContext",
+    "rerank_top", "retrieve",
     "IndexStore", "IndexedChunk", "JsonDurableSink",
     "PgDurableSink", "pg_create_sql", "pg_delete_book_sql", "pg_read_sql",
     "pg_upsert_sql",

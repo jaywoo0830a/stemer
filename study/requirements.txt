@@ -1,6 +1,10 @@
 # study v3 — core 런타임 (빠른 PDF 파싱)
+#   fontTools: pypdf 가 CFF Type1 내장 폰트 인코딩을 온전히 파싱(경고 제거/추출 품질)
 # 선택 의존성:
 #   실제 임베딩(bge-m3): pip install -r requirements-embed.txt
 #   스캔본 OCR/VLM 파싱 : pip install "docling"  (무거움, 매우 느림 — 도커 권장)
 #   pgvector 영속       : pip install "psycopg[binary]"
 pypdf>=4
+fonttools>=4
+# 어휘 검색은 store 내장 BM25(양수 평활 idf) 사용 — 외부 bm25 라이브러리 불필요
+

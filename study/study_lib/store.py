@@ -120,6 +120,45 @@ def _terms(text: str) -> set[str]:
     return {t for t in _TOKEN_SPLIT.split(text.lower()) if t}
 
 
+def _token_list(text: str) -> list[str]:
+    """중복 보존 토큰 목록 (tf 계산용)."""
+    return [t for t in _TOKEN_SPLIT.split(text.lower()) if t]
+
+
+def _match_count(tokens: list[str], q: str) -> int:
+    """정확일치 또는 접두사 일치(경량 스테밍, q 길이 ≥4): derivative ≈ derivatives."""
+    if len(q) >= 4:
+        return sum(1 for t in tokens if t == q or t.startswith(q))
+    return tokens.count(q)
+
+
+def _bm25_scores(tokenized_docs: list[list[str]], query_terms: set[str],
+                 k1: float = 1.5, b: float = 0.75) -> list[float]:
+    """안정적인 BM25 (양수 평활 idf + 접두사 스테밍) — 책 단위 소규모에도 음수 없음."""
+    n = len(tokenized_docs)
+    if n == 0:
+        return []
+    lengths = [len(d) for d in tokenized_docs]
+    avg_len = sum(lengths) / n
+    # 문서별 접두사 포함 여부로 df 계산
+    df: dict[str, int] = {}
+    for q in query_terms:
+        df[q] = sum(1 for doc in tokenized_docs if _match_count(doc, q) > 0)
+    scores = []
+    for doc, length in zip(tokenized_docs, lengths):
+        total = 0.0
+        for q in query_terms:
+            freq = _match_count(doc, q)
+            doc_df = df[q]
+            if freq == 0 or doc_df <= 0:
+                continue
+            idf = math.log(1.0 + (n - doc_df + 0.5) / (doc_df + 0.5))
+            denom = freq + k1 * (1 - b + b * length / avg_len) if avg_len else freq
+            total += idf * (freq * (k1 + 1)) / denom
+        scores.append(total)
+    return scores
+
+
 class IndexStore:
     """메모리(RAM) 버퍼 + 선택적 영속 sink. 검색은 메모리에서 수행한다."""
 
@@ -185,17 +224,24 @@ class IndexStore:
 
     def search_text(self, query: str, k: int = 5, *,
                     book_id: str | None = None) -> list[SearchHit]:
+        docs = [c for c in self._mem.values()
+                if book_id is None or c.book_id == book_id]
+        if not docs:
+            return []
         qterms = _terms(query)
-        scored = []
-        for c in self._mem.values():
-            if book_id is not None and c.book_id != book_id:
-                continue
-            overlap = len(qterms & _terms(c.text))
-            score = float(overlap)
-            if overlap == 0 and query.lower() in c.text.lower():
-                score = 0.5  # 정확 부분 문자열 보너스
-            if score:
-                scored.append((score, c))
+        tokenized = [_token_list(c.text) for c in docs]
+        bm25 = _bm25_scores(tokenized, qterms)
+
+        scored: list[tuple[float, object]] = []
+        for c, score in zip(docs, bm25):
+            if score > 0:
+                scored.append((float(score), c))
+        if not scored and qterms:
+            # 토큰화가 안 되는 쿼리(특수문자 등) → 정확 부분 문자열 폴백
+            for c in docs:
+                if query.lower() in c.text.lower():
+                    scored.append((0.5, c))
+
         scored.sort(key=lambda t: (-t[0], t[1].chunk_id))
         return [SearchHit(chunk_id=c.chunk_id, book_id=c.book_id, section=c.section,
                           text=c.text, score=score) for score, c in scored[:k]]
