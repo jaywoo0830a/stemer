@@ -1,90 +1,63 @@
 #!/usr/bin/env bash
-# upload-books.sh — WSL에서 Windows/리눅스 경로의 교재(PDF)를 SCP 로 서버에 올리는 편의 래퍼.
+# upload-books.sh — WSL에서 교재(PDF/DJVU)를 서버로 SCP 업로드 (업로드 전용, 간단판)
 #
-# 설정: 환경변수 또는 ./upload-books.env (예제: upload-books.env.example)
-#   SB_HOST=user@192.168.0.10     # 필수 (업로드 시)
-#   SB_KEY=~/.ssh/id_ed25519      # 선택 (키 인증). 없으면 비밀번호 입력
-#   SB_ROOT=~/study/books         # 서버 books 루트 (기본)
-#   SB_PULL_SRC=~/study/data/notes  # --pull 시 가져올 서버 폴더
+# 입력: ① 서버(user@host)  ② Windows/로컬 폴더  ③ 서버 업로드 폴더
+#       → 인자로 주거나, 없으면 물어봅니다.
+#    ./upload-books.sh "user@서버IP" 'C:\Users\me\Downloads\수학' ~/study/books/math
+#    ./upload-books.sh                       # 셋 다 입력 프롬프트
 #
-# 사용 예:
-#   ./upload-books.sh 'C:\Users\me\Downloads\math-books'            # Windows 경로 자동 변환
-#   ./upload-books.sh /mnt/c/Users/me/Downloads/math-books phys     # 서브폴더 지정(→ ~/study/books/phys)
-#   ./upload-books.sh -n 'C:\...'                                   # 건조 실행(목록만)
-#   ./upload-books.sh --pull 'C:\Users\me\study-notes'              # 서버 notes 를 로컬로 받기
+# 참고: ./upload-books.env 에 SB_HOST/SB_KEY 를 적어두면 프롬프트를 건너뜁니다.
 set -euo pipefail
 
-# ---- 설정 로드 (env 우선, 없으면 파일) ----
+# ---- env 파일(선택) 로드 ----
 if [[ -f ./upload-books.env ]]; then
   set -a; # shellcheck disable=SC1091
   source ./upload-books.env
   set +a
-elif [[ -f "$HOME/.config/study/upload-books.env" ]]; then
-  set -a; # shellcheck disable=SC1091
-  source "$HOME/.config/study/upload-books.env"
-  set +a
 fi
 
-SB_HOST="${SB_HOST:-}"
-SB_KEY="${SB_KEY:-}"
-SB_ROOT="${SB_ROOT:-~/study/books}"     # 서버 기준 (원격에서 ~ 확장됨)
-SB_PULL_SRC="${SB_PULL_SRC:-~/study/data/notes}"
+SERVER="${1:-$SB_HOST}"
+KEY="${SB_KEY:-}"
+LOCAL="${2:-}"
+REMOTE="${3:-}"
 
-# ---- 인자 파싱 ----
-DRY=0
-MODE=push
-if [[ "${1:-}" == "-n" || "${1:-}" == "--dry-run" ]]; then DRY=1; shift || true; fi
-if [[ "${1:-}" == "--pull" ]]; then MODE=pull; shift || true; fi
-SRC_RAW="${1:-}"
-SUBDIR="${2:-math}"     # 업로드 시 서버 서브폴더 (예: math)
+# ---- 누락 항목 프롬프트 ----
+ask() { local -n _v="$1"; local msg="$2"; if [[ -z "$_v" ]]; then read -r -p "$msg: " _v; fi; }
+ask SERVER "서버 (user@host)            "
+[[ -z "$LOCAL" ]] && read -r -p "Windows/로컬 폴더 경로     " LOCAL
+[[ -z "$REMOTE" ]] && read -r -p "서버 업로드 폴더(예 ~/study/books/math): " REMOTE
 
-[[ -z "$SRC_RAW" ]] && { echo "usage: $0 [-n] [--pull] <source-path> [subdir]" >&2; exit 2; }
+# 붙여넣을 때 섞여 들어온 따옴표 제거
+stripq() { local v="$1"; v="${v#\"}"; v="${v#\'}"; v="${v%\"}"; v="${v%\'}"; printf '%s' "$v"; }
+SERVER="$(stripq "$SERVER")"
+LOCAL="$(stripq "$LOCAL")"
+REMOTE="$(stripq "$REMOTE")"
+
+[[ -z "$SERVER" || -z "$LOCAL" || -z "$REMOTE" ]] && { echo "모든 입력이 필요합니다." >&2; exit 2; }
 
 # ---- Windows 경로 → WSL 경로 변환 ----
-resolve() {
-  local p="$1"
-  if [[ "$p" =~ ^[A-Za-z]:[/\\] || "$p" =~ ^\\\\ ]]; then
-    if command -v wslpath >/dev/null 2>&1; then
-      wslpath -u "$p"
-    else
-      echo "error: Windows 경로인데 wslpath 를 찾을 수 없습니다." >&2
-      return 1
-    fi
+if [[ "$LOCAL" =~ ^[A-Za-z]:[/\\] || "$LOCAL" =~ ^\\\\ ]]; then
+  if command -v wslpath >/dev/null 2>&1; then
+    LOCAL="$(wslpath -u "$LOCAL")"
   else
-    printf '%s' "$p"
+    echo "error: Windows 경로인데 wslpath 가 없습니다." >&2; exit 1
   fi
-}
-
-if [[ "$MODE" == "push" ]]; then
-  SRC="$(resolve "$SRC_RAW")"
-  [[ -d "$SRC" ]] || { echo "error: source is not a directory: $SRC" >&2; exit 1; }
-
-  # PDF(+옵션 확장자) 수집
-  mapfile -t FILES < <(find "$SRC" -maxdepth 1 -type f \( -iname '*.pdf' -o -iname '*.djvu' \) | sort)
-  if [[ ${#FILES[@]} -eq 0 ]]; then
-    echo "no PDF/DJVU files in $SRC" >&2
-    exit 1
-  fi
-
-  echo "== upload plan =="
-  echo "  source : $SRC (${#FILES[@]} files)"
-  echo "  target : ${SB_HOST:-'(host 미설정)'}:$SB_ROOT/$SUBDIR/"
-  [[ "$DRY" -eq 1 ]] && { printf '  - %s\n' "${FILES[@]}"; echo "(dry-run — 종료)"; exit 0; }
-
-  [[ -z "$SB_HOST" ]] && { echo "error: SB_HOST 미설정 (upload-books.env 참고)" >&2; exit 1; }
-
-  ssh ${SB_KEY:+-i "$SB_KEY"} "$SB_HOST" "mkdir -p \"$SB_ROOT/$SUBDIR\""
-  printf '  - %s\n' "${FILES[@]}"
-  scp ${SB_KEY:+-i "$SB_KEY"} -r "${FILES[@]}" "$SB_HOST:$SB_ROOT/$SUBDIR/"
-  echo "done. 서버에서: bash docker/run.sh ingest \"$SB_ROOT/$SUBDIR\" --subject $SUBDIR --profile fast --jobs 4"
-else
-  DEST="$(resolve "$SRC_RAW")"
-  mkdir -p "$DEST"
-  echo "== pull plan =="
-  echo "  from : ${SB_HOST:-'(host 미설정)'}:$SB_PULL_SRC/"
-  echo "  to   : $DEST"
-  [[ "$DRY" -eq 1 ]] && { echo "(dry-run — 종료)"; exit 0; }
-  [[ -z "$SB_HOST" ]] && { echo "error: SB_HOST 미설정" >&2; exit 1; }
-  scp ${SB_KEY:+-i "$SB_KEY"} -r "$SB_HOST:$SB_PULL_SRC/" "$DEST/"
-  echo "done."
 fi
+[[ -d "$LOCAL" ]] || { echo "error: 폴더가 없습니다: $LOCAL" >&2; exit 1; }
+
+# ---- 업로드할 파일 수집 ----
+mapfile -t FILES < <(find "$LOCAL" -maxdepth 1 -type f \( -iname '*.pdf' -o -iname '*.djvu' \) | sort)
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  echo "해당 폴더에 PDF/DJVU 가 없습니다: $LOCAL" >&2; exit 1
+fi
+
+echo "== 업로드 계획 =="
+echo "  파일 ${#FILES[@]}개 (PDF/DJVU): $LOCAL"
+echo "  → $SERVER:$REMOTE/"
+printf '   - %s\n' "${FILES[@]}"
+
+# ---- 서버 폴더 생성 후 SCP ----
+ssh ${KEY:+-i "$KEY"} "$SERVER" "mkdir -p $REMOTE"
+scp ${KEY:+-i "$KEY"} "${FILES[@]}" "$SERVER:$REMOTE/"
+echo "완료 ✅  서버에서 인덱싱: bash docker/run.sh ingest \"$REMOTE\" --subject math --profile fast --jobs 4"
+
