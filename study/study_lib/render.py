@@ -44,12 +44,35 @@ EXT_LABELS: dict[str, str] = {
 _LVL = {"b": "Basic", "a": "Advanced"}
 
 
+def _wrap_formula(text: str) -> str:
+    """Formula(f) 슬롯은 항상 수학이므로 $ 밖이면 안전하게 $...$ 로 감싼다.
+
+    - 이미 $ 로 감싼 값은 그대로 둔다 (멱등).
+    - 너무 길거나 문서형(줄바꿈 여러 개)이면 그대로 둔다 (오탐 방지).
+    - 금지 다중행 env(align 등)나 금지 매크로가 섞이면 감싸지 않는다.
+    """
+    s = (text or "").strip()
+    if not s:
+        return text
+    if s.startswith("$") and s.endswith("$") and len(s) > 1:
+        return text                       # 이미 인라인 수식
+    if s.startswith("$$") or "\n" in s:
+        return text                       # 디스플레이/멀티라인 → 그대로
+    if len(s) > 200:
+        return text
+    for env in ("\\begin{align", "\\begin{equation", "\\begin{gather",
+                "\\begin{cases", "\\begin{matrix"):
+        if env in s:
+            return text
+    return f"${s}$"
+
+
 def _concept_block(concept: dict) -> str:
     lines = [f"### {concept.get('c', '')}".rstrip()]
     if concept.get("d"):
         lines += ["", f"**Definition.** {concept['d']}"]
     if concept.get("f"):
-        lines += ["", f"**Formula.** {concept['f']}"]
+        lines += ["", f"**Formula.** {_wrap_formula(concept['f'])}"]
     if concept.get("k"):
         lines += ["", f"**Intuition.** {concept['k']}"]
     if concept.get("m"):
