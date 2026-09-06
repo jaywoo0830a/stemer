@@ -19,6 +19,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .bookmarks import discover_topics_from_bookmarks
 from .chunk import chunk_markdown
 from .discover import discover_topics
 from .embed import StubEmbedder, TransformerEmbedder
@@ -123,6 +124,23 @@ def _topics_discover(ws: Workspace, args) -> int:
     store = ws.open_store()
     store.load_all()
     report = discover_topics(args.book, library=lib, store=store, kind=args.kind)
+    for tid in report.added:
+        t = lib.topic(tid)
+        print(f"added topic {t.topic_id} ({t.section}) {t.title}")
+    print(report.summary())
+    return 0
+
+
+def _topics_discover_bookmarks(ws: Workspace, args) -> int:
+    """PDF 북마크에서 번호 섹션 토픽 생성 (docling 이 번호를 버리는 책용)."""
+    lib = ws.library()
+    book = lib.book(args.book)
+    source = args.source or book.source
+    if not source:
+        print("error: --source 필요 (책 source 가 비어 있음)", file=sys.stderr)
+        return 1
+    report = discover_topics_from_bookmarks(args.book, library=lib,
+                                            source=source, kind=args.kind)
     for tid in report.added:
         t = lib.topic(tid)
         print(f"added topic {t.topic_id} ({t.section}) {t.title}")
@@ -294,6 +312,14 @@ def build_parser() -> argparse.ArgumentParser:
     td.add_argument("--kind", default="exam",
                     choices=["exam", "note", "problems"])
     td.set_defaults(func=_topics_discover)
+
+    tdb = ts.add_parser("discover-bookmarks", parents=[common])
+    tdb.add_argument("--book", required=True)
+    tdb.add_argument("--source",
+                     help="PDF 경로 (기본: 책의 source 메타데이터)")
+    tdb.add_argument("--kind", default="exam",
+                     choices=["exam", "note", "problems"])
+    tdb.set_defaults(func=_topics_discover_bookmarks)
 
     st = subp("status")
     st.set_defaults(func=_status)
