@@ -246,3 +246,10 @@ class Library:
         for tid in doomed:
             del self._state.topics[tid]
         return len(doomed)
+
+    def delete_book(self, book_id: str) -> int:
+        """책과 그 책의 모든 토픽 삭제. (store 청크·notes 파일은 별도 정리.)"""
+        self.book(book_id)  # 없으면 KeyError
+        removed = self.clear_topics(book_id)
+        del self._state.books[book_id]
+        return removed

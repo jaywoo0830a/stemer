@@ -131,3 +131,19 @@ def test_clear_and_delete_topics():
     # 없는 책은 KeyError
     with pytest.raises(KeyError, match="unknown book"):
         lib.clear_topics("missing")
+
+
+def test_delete_book_removes_book_and_its_topics():
+    lib = Library(InMemoryStore())
+    lib.add_book("a", "Book A", "math")
+    lib.add_topic(book_id="a", title="X", section="1.1")
+    lib.add_topic(book_id="a", title="Y", section="1.2")
+    lib.add_book("b", "Book B", "math")
+    lib.add_topic(book_id="b", title="Z", section="2.1")
+    removed = lib.delete_book("a")
+    assert removed == 2                     # a의 토픽 2개
+    with pytest.raises(KeyError, match="unknown book"):
+        lib.book("a")
+    assert lib.topics(book_id="b")           # b는 그대로
+    with pytest.raises(KeyError, match="unknown book"):
+        lib.delete_book("missing")

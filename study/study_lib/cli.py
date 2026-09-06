@@ -94,6 +94,34 @@ def _books_set_page_range(ws: Workspace, args) -> int:
     return 0
 
 
+def _books_rm(ws: Workspace, args) -> int:
+    """책·토픽·store 청크·notes 파일을 모두 삭제 (--yes 필수)."""
+    print(f"WARNING: this deletes book '{args.book}', its topics, "
+          f"stored chunks, and notes files.", file=sys.stderr)
+    if not args.yes:
+        print("aborted: pass --yes to confirm", file=sys.stderr)
+        return 1
+    lib = ws.library()
+    topics = len(lib.topics(book_id=args.book))
+    # notes 파일 삭제
+    removed_notes = 0
+    for t in lib.topics(book_id=args.book):
+        if t.note_path:
+            np = Path(t.note_path)
+            if np.exists():
+                np.unlink()
+                removed_notes += 1
+    lib.delete_book(args.book)          # book + topics
+    lib.save()
+    # store 청크 삭제
+    store_path = Path(args.store)
+    jsonl = store_path / f"{args.book}.jsonl"
+    if jsonl.exists():
+        jsonl.unlink()
+    print(f"deleted book {args.book}: topics={topics} notes_files={removed_notes}")
+    return 0
+
+
 # ---- topics ----
 def _topics_add(ws: Workspace, args) -> int:
     lib = ws.library()
@@ -310,6 +338,11 @@ def build_parser() -> argparse.ArgumentParser:
     psr.add_argument("--range", dest="range_",
                      help="페이지 범위 '42-1249' (1-based) — 전체로 되돌리려면 빈 값/생략")
     psr.set_defaults(func=_books_set_page_range)
+    prm = bs.add_parser("rm", parents=[common])
+    prm.add_argument("--book", required=True)
+    prm.add_argument("--yes", action="store_true",
+                     help="삭제 승인 (없으면 중단)")
+    prm.set_defaults(func=_books_rm)
 
     p = subp("topics")
     ts = p.add_subparsers(dest="action", required=True)
