@@ -143,7 +143,16 @@ class FlashClient:
         data = resp.json()
         usage = extract_usage(data)
         try:
-            raw = data["choices"][0]["message"]["content"]
+            message = data["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise LLMError(f"unexpected response shape: {str(data)[:300]}") from exc
+            raise LLMError(f"unexpected response shape: {str(data)[:400]}") from exc
+        raw = message.get("content")
+        if raw is None or str(raw).strip() == "":
+            # 추론형 모델 등 content 대신 다른 키에 답을 넣을 수 있다 → 진단
+            finish = data.get("choices", [{}])[0].get("finish_reason")
+            raise LLMError(
+                "model returned empty content: "
+                f"finish_reason={finish} message_keys={sorted(message)} "
+                f"msg={str(message)[:400]}"
+            )
         return LLMResult(content=parse_json_content(raw), usage=usage)
