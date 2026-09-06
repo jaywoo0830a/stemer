@@ -1,0 +1,6 @@
+# study v3 — core 런타임 (빠른 PDF 파싱)
+# 선택 의존성:
+#   실제 임베딩(bge-m3): pip install -r requirements-embed.txt
+#   스캔본 OCR/VLM 파싱 : pip install "docling"  (무거움, 매우 느림 — 도커 권장)
+#   pgvector 영속       : pip install "psycopg[binary]"
+pypdf>=4

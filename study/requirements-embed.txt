@@ -1,0 +1,3 @@
+# 실제 임베딩(bge-m3) — torch 포함, 수 GB (64GB 서버 기준 OK)
+# 없으면 인덱싱/생성 파이프라인은 돌지만 검색 품질이 낮아짐(stub 폴백)
+sentence-transformers>=3

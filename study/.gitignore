@@ -7,7 +7,7 @@ notes/
 books/
 index/
 store/
-store/
+data/
 *.db
 registry.json
 pilot/registry.json

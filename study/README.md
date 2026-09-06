@@ -50,3 +50,13 @@ python -m study_lib.cli ingest books/math --subject math --profile fast --jobs 4
 # 인덱스된 책의 섹션에서 토픽 자동 생성 → generate 로 직결
 python -m study_lib.cli topics discover --book calc
 ```
+
+## Docker (서버 배포)
+
+서버에서 전부 도커로 띄우려면 [`DOCKER.md`](DOCKER.md) 를 참고:
+
+```bash
+mkdir -p books/math data && cp /path/*.pdf books/math/
+EMBED=1 bash docker/build.sh          # 임베딩 포함 빌드
+bash docker/run.sh ingest /books/math --subject math --profile fast --jobs 4
+```

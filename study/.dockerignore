@@ -1,0 +1,15 @@
+# 도커 빌드 컨텍스트에서 제외
+.git/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+books/
+store/
+notes/
+registry.json
+pilot/
+Dockerfile*
+docker-compose*
+docs/

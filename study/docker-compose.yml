@@ -1,0 +1,15 @@
+services:
+  study:
+    image: study:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        EMBED: ${EMBED:-0}
+    volumes:
+      - ./books:/books          # 입력 PDF 폴더 (호스트 study/books)
+      - ./data:/data            # 영속: registry.json / store/ / notes/
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-}
+    command: ["python", "-m", "study_lib.cli", "status"]
