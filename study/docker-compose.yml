@@ -20,6 +20,9 @@ services:
       OMP_NUM_THREADS: ${OMP_NUM_THREADS:-2}
       MKL_NUM_THREADS: ${MKL_NUM_THREADS:-2}
       TOKENIZERS_PARALLELISM: "false"
+      # AVX-512 지원 CPU(Zen4/5, 9700X)에서 oneDNN 이 AVX-512 커널을 쓰도록.
+      # 지원 안 하는 CPU에서 강제하면 크래시 → 미지원 CPU 배포 시 비워둘 것.
+      ONEDNN_MAX_CPU_ISA: ${ONEDNN_MAX_CPU_ISA:-AVX512_CORE}
     command: ["python", "-m", "study_lib.cli", "status"]
 
 volumes:
