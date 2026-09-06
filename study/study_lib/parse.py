@@ -32,7 +32,7 @@ _WORDY = re.compile(r"[A-Za-z0-9]")
 
 
 def _clean_glyph_noise(text: str) -> str:
-    """글리프 코드(/H\d+)와 순수 쓰레기 줄 제거 — 폰트 매핑 깨진 PDF 정화."""
+    """글리프 코드(/H + 숫자)와 순수 쓰레기 줄 제거 — 폰트 매핑 깨진 PDF 정화."""
     out: list[str] = []
     for ln in text.splitlines():
         s = re.sub(r"\s+", " ", _GLYPH_CODE.sub(" ", ln)).strip()
