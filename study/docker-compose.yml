@@ -9,9 +9,17 @@ services:
     volumes:
       - ./books:/books          # 입력 PDF 폴더 (호스트 study/books)
       - ./data:/data            # 영속: registry.json / store/ / notes/
+      - hf-cache:/root/.cache/huggingface   # HF 모델 캐시 영속(재다운로드 방지)
     environment:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-}
       HF_TOKEN: ${HF_TOKEN:-}             # HF 다운로드 인증(읽기 전용) → rate limit 상향
       HF_ENDPOINT: ${HF_ENDPOINT:-}       # 미러(예: https://hf-mirror.com) 선택
+      # 8코어에서 워커 여러 개가 torch 스레드를 과사용하지 않도록 캡 (jobs×OMP ≤ 코어수 권장)
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-2}
+      MKL_NUM_THREADS: ${MKL_NUM_THREADS:-2}
+      TOKENIZERS_PARALLELISM: "false"
     command: ["python", "-m", "study_lib.cli", "status"]
+
+volumes:
+  hf-cache:
