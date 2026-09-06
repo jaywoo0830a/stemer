@@ -11,14 +11,20 @@ services:
       - ./books:/books          # 입력 PDF 폴더 (호스트 study/books)
       - ./data:/data            # 영속: registry.json / store/ / notes/
       - hf-cache:/root/.cache/huggingface   # HF 모델 캐시 영속(재다운로드 방지)
+    # /dev/shm 확대: docling 스레드 파이프라인/DataLoader 공유메모리 (기본 64MB 는 부족)
+    shm_size: '2gb'
+    ulimits:
+      nofile:                    # 대형 PDF·수천 청크의 파일 핸들
+        soft: 65535
+        hard: 65535
     environment:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-}
       HF_TOKEN: ${HF_TOKEN:-}             # HF 다운로드 인증(읽기 전용) → rate limit 상향
       HF_ENDPOINT: ${HF_ENDPOINT:-}       # 미러(예: https://hf-mirror.com) 선택
-      # 8코어에서 워커 여러 개가 torch 스레드를 과사용하지 않도록 캡 (jobs×OMP ≤ 코어수 권장)
-      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-2}
-      MKL_NUM_THREADS: ${MKL_NUM_THREADS:-2}
+      # 스레드는 코드가 관리한다(_cap_worker_threads / docling AcceleratorOptions).
+      # 여기 OMP 캡을 두면 docling 단독 실행까지 2스레드로 묶여 역효과 → 제거.
+      # jobs 병렬 인제스트는 워커가 스스로 OMP 캡을 건다.
       TOKENIZERS_PARALLELISM: "false"
       # AVX-512 지원 CPU(Zen4/5, 9700X)에서 oneDNN 이 AVX-512 커널을 쓰도록.
       # 지원 안 하는 CPU에서 강제하면 크래시 → 미지원 CPU 배포 시 비워둘 것.

@@ -57,14 +57,29 @@ def test_docling_threads_uses_env_override(monkeypatch):
 
 def test_docling_threads_defaults_to_cpu_minus_one(monkeypatch):
     monkeypatch.delenv("DOCLING_THREADS", raising=False)
+    monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
     n = parse._docling_threads()
     assert n == max(1, (parse.os.cpu_count() or 4) - 1)
 
 
 def test_docling_threads_ignores_invalid_env(monkeypatch):
     monkeypatch.setenv("DOCLING_THREADS", "abc")
+    monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
     n = parse._docling_threads()
     assert n == max(1, (parse.os.cpu_count() or 4) - 1)
+
+
+def test_docling_threads_respects_worker_omp_cap(monkeypatch):
+    # jobs 병렬 워커가 OMP 캡을 걸면 docling 도 이를 존중 (oversubscription 방지)
+    monkeypatch.delenv("DOCLING_THREADS", raising=False)
+    monkeypatch.setenv("OMP_NUM_THREADS", "2")
+    assert parse._docling_threads() == 2
+
+
+def test_docling_threads_env_override_wins_over_omp(monkeypatch):
+    monkeypatch.setenv("DOCLING_THREADS", "8")
+    monkeypatch.setenv("OMP_NUM_THREADS", "2")
+    assert parse._docling_threads() == 8
 
 
 # ---- 헤딩 재구성 (fast 파서가 만드는 구조) ----

@@ -153,10 +153,18 @@ def _env_int(name: str, default: int) -> int:
 
 
 def _docling_threads() -> int:
-    """docling 추론 스레드 수: DOCLING_THREADS 명시 > (전체 코어 - 1)."""
+    """docling 추론 스레드 수.
+
+    우선순위: DOCLING_THREADS 명시 > OMP_NUM_THREADS(워커가 설정한 캡) >
+    (전체 코어 - 1). jobs 병렬로 워커가 OMP 캡을 걸면 이를 존중해
+    워커×docling 전체코어 oversubscription 을 막는다.
+    """
     explicit = _env_int("DOCLING_THREADS", 0)
     if explicit > 0:
         return explicit
+    omp = _env_int("OMP_NUM_THREADS", 0)
+    if omp > 0:
+        return omp
     return max(1, (os.cpu_count() or 4) - 1)
 
 
