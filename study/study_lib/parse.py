@@ -5,14 +5,56 @@
 - `profile="fast"`    : 텍스트 레이어 PDF(pypdf) — 빠름, 스캔본 불가
 - `profile="docling"` : OCR/VLM 풀 파싱(docling) — 스캔본·수식 지원, 느림
 
+pypdf 는 글자만 뽑을 뿐 **헤딩 구조를 만들지 않으므로**, fast 프로필은
+`_reconstruct_heads` 로 `1.1 제목` 형태 줄을 `## 헤딩`으로 승격한다.
+(목차 페이지는 줄이 짧고 헤딩 후보가 몰려 있어 제외 — 가짜 섹션 방지.)
+
 의존성이 없으면 **어떤 패키지를 설치해야 하는지** 알려주는 `RuntimeError`.
 """
 from __future__ import annotations
 
 import importlib.util
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+
+_NUM_HEAD_RE = re.compile(r"^\s*\d+(?:\.\d+)+\.?\s+[A-Z]")
+_NUM_HEAD_ONLY_RE = re.compile(r"^\s*\d+(?:\.\d+)+\.?\s+[A-Z].{0,80}$")
+_TOC_MIN = 6       # 이 개수 이상 헤딩 후보면 목차 페이지로 간주
+_MAX_HEAD_LEN = 90
+
+
+def _looks_like_toc(lines: list[str]) -> bool:
+    """페이지의 대부분 줄이 짧은 점-번호 헤딩이면 목차(TOC)로 판단."""
+    if len(lines) < _TOC_MIN:
+        return False
+    hits = sum(1 for ln in lines if _NUM_HEAD_ONLY_RE.match(ln))
+    # 헤딩 후보가 절반 이상 & 줄이 전반적으로 짧으면 목차
+    short = [ln for ln in lines if ln.strip() and len(ln.strip()) < 100]
+    if not short:
+        return False
+    return hits >= max(_TOC_MIN, len(short) // 2)
+
+
+def _reconstruct_heads(page_text: str) -> str:
+    """페이지 텍스트에서 `1.1 제목` 형태 줄을 `## 헤딩`으로 승격.
+
+    목차 페이지는 승격하지 않는다(가짜 섹션 방지). 헤딩은 줄 시작에
+    점 번호 + 공백 + 대문자/숫자로 시작하고 길이가 짧아야 한다.
+    """
+    lines = page_text.splitlines()
+    if _looks_like_toc(lines):
+        return page_text
+    out: list[str] = []
+    for ln in lines:
+        s = ln.strip()
+        if s and len(s) <= _MAX_HEAD_LEN and _NUM_HEAD_RE.match(s):
+            out.append("## " + s)
+        else:
+            out.append(ln)
+    return "\n".join(out)
 
 
 @dataclass
@@ -60,7 +102,7 @@ class FastPdfParser:
 
         p = Path(path)
         reader = pypdf.PdfReader(str(p))
-        pages = [(page.extract_text() or "") for page in reader.pages]
+        pages = [_reconstruct_heads(page.extract_text() or "") for page in reader.pages]
         return ParsedBook(book_id=book_id or p.stem, title=p.stem,
                           markdown="\n\n".join(pages), parser=self.name,
                           pages=len(pages), source=str(p))

@@ -48,3 +48,36 @@ def test_docling_parser_without_dependency_gives_actionable_error(tmp_path):
     p.write_bytes(b"%PDF-1.4 placeholder")
     with pytest.raises(RuntimeError, match="docling"):
         parse.parse_source(p, profile="docling")
+
+
+# ---- 헤딩 재구성 (fast 파서가 만드는 구조) ----
+
+def test_reconstruct_promotes_dotted_number_heading():
+    text = ("1.1 Basic Concepts. Modeling\n"
+            "Some body text here.\n")
+    out = parse._reconstruct_heads(text)
+    assert out.splitlines()[0] == "## 1.1 Basic Concepts. Modeling"
+    assert "Some body text" in out
+
+
+def test_reconstruct_ignores_toc_page():
+    # 목차: 짧은 점-번호 줄이 다수 → 승격하면 안 됨 (가짜 섹션 방지)
+    lines = [f"{c}.{s} Title of section number {n}  {n}" for c in range(1, 4)
+             for s, n in [(1, 10), (2, 20), (3, 30)]]
+    out = parse._reconstruct_heads("\n".join(lines))
+    assert "## " not in out
+
+
+def test_reconstruct_keeps_body_crossrefs_unpromoted():
+    # 본문 상호참조 "(Sec. 4.5)" 는 대문자 시작도 아니고 줄 시작 번호도 아님
+    text = "see (Sec. 4.5) for details.\n"
+    out = parse._reconstruct_heads(text)
+    assert "## " not in out
+    assert "Sec. 4.5" in out
+
+
+def test_reconstruct_ignores_long_or_lowercase_lines():
+    text = ("1.1 this is lowercase so not a heading\n"
+            + "1.2 " + "x" * 200 + "\n")
+    out = parse._reconstruct_heads(text)
+    assert "## " not in out
