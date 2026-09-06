@@ -156,7 +156,9 @@ def _ingest(ws: Workspace, args) -> int:
     report = ingest_dir(args.directory, library=ws.library(), store=ws.open_store(),
                         subject=args.subject, profile=args.profile,
                         embedder_spec=spec, force=args.force, jobs=args.jobs,
-                        chunk_profile=chunk_profile, on_report=report_line)
+                        chunk_profile=chunk_profile,
+                        log=lambda msg: print(msg, flush=True),
+                        on_report=report_line)
     for bid in report.skipped:
         print(f"skip     {bid} (already indexed)")
     print(report.summary())

@@ -28,6 +28,24 @@ from .store import IndexStore
 
 _EXTS = {".pdf", ".md", ".txt"}
 
+EMBED_LOG_EVERY = 200   # 임베딩 진행 로그 주기(청크 수)
+EMBED_BATCH = 32        # 워커당 임베딩 배치
+
+
+def _embed_with_progress(embedder, texts: list, label: str,
+                         log: Callable[[str], None] | None) -> list:
+    """배치 단위 임베딩 + 진행 로그 (조용한 임베딩 단계 가시화)."""
+    out: list = []
+    total = len(texts)
+    if log:
+        log(f"[{label}] embed 0/{total}")
+    for start in range(0, total, EMBED_BATCH):
+        end = min(start + EMBED_BATCH, total)
+        out.extend(embedder.embed_texts(texts[start:end], batch_size=EMBED_BATCH))
+        if log and (end == total or end % EMBED_LOG_EVERY == 0):
+            log(f"[{label}] embed {end}/{total}")
+    return out
+
 
 @dataclass(frozen=True)
 class IngestReport:
@@ -93,22 +111,25 @@ def _resolve_profile(library: Library, book_id: str, explicit: ChunkProfile | No
 
 
 def _worker_ingest(payload: dict) -> dict:
-    """워커: 파싱→청킹→임베딩만 수행. 저장/registry 는 부모가 한다."""
+    """워커: 파싱→청킹→임베딩만 수행(진행 로그 출력). 저장/registry 는 부모가 한다."""
+    bid = payload["book_id"]
     try:
-        parsed = parse_source(payload["path"], profile=payload["profile"],
-                              book_id=payload["book_id"])
+        parsed = parse_source(payload["path"], profile=payload["profile"], book_id=bid)
         _guard_quality(parsed)
-        chunks = chunk_markdown(parsed.markdown, book_id=payload["book_id"],
+        chunks = chunk_markdown(parsed.markdown, book_id=bid,
                                 profile=payload["chunk_profile"])
         if not chunks:
             raise ValueError(f"no chunks extracted from "
                              f"{Path(payload['path']).name} (scanned PDF? use profile=docling)")
+        print(f"[{bid}] parse done pages={parsed.pages} chunks={len(chunks)}", flush=True)
         embedder = _make_embedder(payload["embedder_spec"])
-        vectors = embedder.embed_texts([c.text for c in chunks])
-        return {"ok": True, "book_id": payload["book_id"], "chunks": chunks,
+        vectors = _embed_with_progress(embedder, [c.text for c in chunks], bid, print)
+        print(f"[{bid}] embed done ({len(chunks)} chunks)", flush=True)
+        return {"ok": True, "book_id": bid, "chunks": chunks,
                 "vectors": vectors, "parser": parsed.parser, "pages": parsed.pages}
     except Exception as exc:  # 워커 실패 → 사유만 반환
-        return {"ok": False, "book_id": payload["book_id"], "error": str(exc)}
+        print(f"[{bid}] failed: {exc}", flush=True)
+        return {"ok": False, "book_id": bid, "error": str(exc)}
 
 
 def _commit_ok(library: Library, store: IndexStore, book_id: str,
@@ -124,7 +145,8 @@ def ingest_one(path: str | Path, *, library: Library, store: IndexStore,
                embedder, profile: str | None = None,
                book_id: str | None = None,
                chunk_profile: ChunkProfile | None = None,
-               figures_registry=None) -> IngestReport:
+               figures_registry=None,
+               log: Callable[[str], None] | None = None) -> IngestReport:
     """단일 책 인제스트 (직접 호출용). 성공 시 indexed, 실패 시 failed+사유."""
     p = Path(path)
     bid = book_id or slugify(p.stem)
@@ -141,10 +163,14 @@ def ingest_one(path: str | Path, *, library: Library, store: IndexStore,
         if not chunks:
             raise ValueError(f"no chunks extracted from {p.name} "
                              f"(scanned PDF? use profile=docling)")
-        vectors = embedder.embed_texts([c.text for c in chunks])
+        if log:
+            log(f"[{bid}] parse done pages={parsed.pages} chunks={len(chunks)}")
+        vectors = _embed_with_progress(embedder, [c.text for c in chunks], bid, log)
         _commit_ok(library, store, bid, chunks, vectors, parsed.parser, parsed.pages)
         if figures_registry is not None and parsed.figures:
             register_parsed_figures(figures_registry, parsed.figures, bid)
+        if log:
+            log(f"[{bid}] commit done ({len(chunks)} chunks)")
         return IngestReport(book_id=bid, ok=True, chunks=len(chunks),
                             parser=parsed.parser, pages=parsed.pages)
     except Exception as exc:
@@ -164,7 +190,7 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
                subject: str = "math", profile: str | None = None,
                embedder_spec: tuple = ("auto",), force: bool = False,
                jobs: int = 1, chunk_profile: ChunkProfile | None = None,
-               figures_registry=None,
+               figures_registry=None, log: Callable[[str], None] | None = None,
                on_report: Callable[[IngestReport], None] | None = None) -> BatchReport:
     """클라이언트 진입점 — 폴더 배치 인제스트."""
     dirp = Path(directory)
@@ -213,7 +239,7 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
             report = ingest_one(p, library=library, store=store, embedder=embedder,
                                 profile=profile, book_id=bid,
                                 chunk_profile=chunk_profile,
-                                figures_registry=figures_registry)
+                                figures_registry=figures_registry, log=log)
             (ingested if report.ok else failed).append(report)
             if on_report:
                 on_report(report)
