@@ -28,7 +28,20 @@ SYSTEM_TEMPLATE = (
     "You generate concise textbook study-guide content for one topic.\n"
     "Respond with ONLY a JSON object conforming to the payload schema below.\n"
     "Keep every value within its token budget; be precise, not verbose.\n"
-    "Prefer Unicode math symbols (ε, ∀, ∃, →) over LaTeX commands where possible.\n"
+    "\n"
+    "MATH-PROTOCOL (KaTeX rendering, minimal output tokens):\n"
+    "- Wrap every math expression in $...$ so it renders: $y' = f(x,y)$.\n"
+    "- Inside $...$, prefer Unicode math chars (∫ ∑ √ ∂ ≤ ≥ ≠ ∈ ∀ ∃ ⇒ ∞ ± × ÷, "
+    "prime ′) — KaTeX renders them directly and they cost fewer tokens.\n"
+    "- Use Unicode sub/superscripts when possible: y₂, x², aₙ₊₁ (KaTeX renders "
+    "these as real sub/superscripts).\n"
+    "- Only for structures Unicode can't draw, use the minimal allowed commands: "
+    "\\frac{}{}, \\sqrt{}, \\sum_{i=1}^n, \\int_a^b, \\lim_{}, \\to, \\infty, "
+    "\\cdot, \\left( \\right).\n"
+    "- NEVER use multi-line environments (align, equation, gather, cases, "
+    "matrix) or \\bm, \\mathds, \\text, \\tag.\n"
+    "- Do NOT wrap prose sentences in $...$ — only actual math.\n"
+    "- Prefer Unicode math symbols (ε, ∀, ∃, →) over LaTeX commands where possible.\n"
 )
 
 

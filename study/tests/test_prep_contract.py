@@ -85,6 +85,33 @@ def test_lint_katex_passes_clean_output():
     assert lint_katex(md) == []
 
 
+# ---- ⑤-b KaTeX MATH-PROTOCOL (출력 최소 + 오류 방지) ----
+def test_lint_passes_unicode_first_with_minimal_macros():
+    md = ("**Formula.** $y' = f(x,y)$, $\\frac{dy}{dx}$, "
+          "$\\sum_{i=1}^n x_i$, $\\int_0^1 x\\,dx$\n")
+    assert lint_katex(md) == []
+
+
+def test_lint_flags_unbalanced_dollars():
+    md = "**Formula.** $y' = f(x,y)\n"   # 닫는 $ 없음
+    issues = lint_katex(md)
+    assert any("$" in i.message for i in issues)
+
+
+def test_lint_flags_macro_outside_allowed_set():
+    md = "**Formula.** $\\dfrac{d}{dx}$ is fine but $\\notarealmacro{x}$ breaks\n"
+    issues = lint_katex(md)
+    assert any("notarealmacro" in i.message for i in issues)
+    # 허용된 \\dfrac 는 보고 안 됨
+    assert not any("dfrac" in i.message for i in issues)
+
+
+def test_lint_passes_plain_unicode_without_dollars():
+    # 수식이 없는 일반 문장/유니코드 기호는 $ 없이도 통과 (balance 0)
+    md = "The limit is L ⇔ ∀ε>0.  Not math: hello world.\n"
+    assert lint_katex(md) == []
+
+
 def test_factory_reports_lint_warnings_without_failing(tmp_path, schema):
     lib = Library(InMemoryStore())
     lib.add_book("calc", "Calculus", "math")
