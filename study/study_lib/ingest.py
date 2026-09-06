@@ -30,13 +30,16 @@ from .store import IndexStore
 
 _EXTS = {".pdf", ".md", ".txt"}
 
-EMBED_LOG_EVERY = 50   # 임베딩 진행 로그 주기(청크 수) — CPU 인코딩은 느려 200은 너무 듬성
 EMBED_BATCH = 32        # 워커당 임베딩 배치
 
 
 def _embed_with_progress(embedder, texts: list, label: str,
                          log: Callable[[str], None] | None) -> list:
-    """배치 단위 임베딩 + 진행 로그(경과시간 포함) — 멈춤 vs 느림 구분용."""
+    """배치 단위 임베딩 + 배치마다 진행 로그(경과시간 포함).
+
+    주의: `end % N == 0` 방식은 end 가 배치(32)의 배수라 lcm(N,32) 마다만
+    찍혀 조용한 구간이 길어진다 → **배치 완료마다** 로그한다.
+    """
     out: list = []
     total = len(texts)
     t0 = time.monotonic()
@@ -45,7 +48,7 @@ def _embed_with_progress(embedder, texts: list, label: str,
     for start in range(0, total, EMBED_BATCH):
         end = min(start + EMBED_BATCH, total)
         out.extend(embedder.embed_texts(texts[start:end], batch_size=EMBED_BATCH))
-        if log and (end == total or end % EMBED_LOG_EVERY == 0):
+        if log:
             el = time.monotonic() - t0
             log(f"[{label}] embed {end}/{total} (+{el:.0f}s)")
     return out
@@ -143,8 +146,11 @@ def _worker_ingest(payload: dict) -> dict:
                              f"{Path(payload['path']).name} (scanned PDF? use profile=docling)")
         print(f"[{bid}] parse done pages={parsed.pages} chunks={len(chunks)}", flush=True)
         embedder = _make_embedder(payload["embedder_spec"])
+        t0 = time.monotonic()
         vectors = _embed_with_progress(embedder, [c.text for c in chunks], bid, print)
-        print(f"[{bid}] embed done ({len(chunks)} chunks)", flush=True)
+        el = time.monotonic() - t0
+        rate = len(chunks) / el if el > 0 else float("inf")
+        print(f"[{bid}] embed done {len(chunks)} chunks in {el:.0f}s ({rate:.1f}/s)", flush=True)
         return {"ok": True, "book_id": bid, "chunks": chunks,
                 "vectors": vectors, "parser": parsed.parser, "pages": parsed.pages}
     except Exception as exc:  # 워커 실패 → 사유만 반환
