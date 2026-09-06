@@ -12,4 +12,6 @@ services:
     environment:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-}
+      HF_TOKEN: ${HF_TOKEN:-}             # HF 다운로드 인증(읽기 전용) → rate limit 상향
+      HF_ENDPOINT: ${HF_ENDPOINT:-}       # 미러(예: https://hf-mirror.com) 선택
     command: ["python", "-m", "study_lib.cli", "status"]

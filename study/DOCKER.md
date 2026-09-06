@@ -34,6 +34,9 @@ bash docker/run.sh generate --book stewart                   # Flash 키 필요
 - 입력 PDF: 호스트 `study/books/math/` → 컨테이너 `/books/math`.
 - 영속 데이터: 호스트 `study/data/` → 컨테이너 `/data` (registry.json / store/ / notes/).
 - env: `DEEPSEEK_API_KEY`/`DEEPSEEK_MODEL` 을 shell 에 export 하면 compose 가 넘겨줌.
+  **또는 `study/.env` 파일로 관리**(권장): `.env.example` 복사 후 채우면 `docker/run.sh`·`build.sh`가 자동 사용.
+- **HF 모델 다운로드 가속**: `.env`에 `HF_TOKEN=...`(읽기 전용) → 속도 제한 상향.
+  HF 가 느린 네트워크면 `HF_ENDPOINT=https://hf-mirror.com` 도 함께 사용.
 
 ## 4. 내부 테스트(스모크)
 ```bash

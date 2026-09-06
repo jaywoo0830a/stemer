@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 .idea/
+.env
 notes/
 books/
 index/
