@@ -232,3 +232,17 @@ class Library:
             topic.note_path = note_path
         topic.updated_at = _now()
         return topic
+
+    def delete_topic(self, topic_id: str) -> None:
+        """토픽 1건 삭제 (잘못 discover 된 토픽 정리용)."""
+        self.topic(topic_id)  # 없으면 KeyError
+        del self._state.topics[topic_id]
+
+    def clear_topics(self, book_id: str) -> int:
+        """책의 모든 토픽 삭제 — 잘못 생성된 토픽을 지우고 다시 discover 하기 위함."""
+        self.book(book_id)  # 미등록 책이면 KeyError
+        doomed = [t.topic_id for t in self._state.topics.values()
+                  if t.book_id == book_id]
+        for tid in doomed:
+            del self._state.topics[tid]
+        return len(doomed)

@@ -119,6 +119,22 @@ def _topics_set(ws: Workspace, args) -> int:
     return 0
 
 
+def _topics_rm(ws: Workspace, args) -> int:
+    lib = ws.library()
+    lib.delete_topic(args.topic)
+    lib.save()
+    print(f"deleted topic {args.topic}")
+    return 0
+
+
+def _topics_clear(ws: Workspace, args) -> int:
+    lib = ws.library()
+    n = lib.clear_topics(args.book)
+    lib.save()
+    print(f"cleared {n} topics for {args.book}")
+    return 0
+
+
 def _topics_discover(ws: Workspace, args) -> int:
     lib = ws.library()
     store = ws.open_store()
@@ -306,6 +322,12 @@ def build_parser() -> argparse.ArgumentParser:
     tset.add_argument("--status", required=True,
                       choices=["todo", "draft", "review", "done"])
     tset.set_defaults(func=_topics_set)
+    trm = ts.add_parser("rm", parents=[common])
+    trm.add_argument("topic")
+    trm.set_defaults(func=_topics_rm)
+    tclear = ts.add_parser("clear", parents=[common])
+    tclear.add_argument("--book", required=True)
+    tclear.set_defaults(func=_topics_clear)
 
     td = ts.add_parser("discover", parents=[common])
     td.add_argument("--book", required=True)

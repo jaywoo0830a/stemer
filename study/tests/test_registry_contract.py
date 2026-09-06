@@ -111,3 +111,23 @@ def test_book_parser_field_and_setters_roundtrip(tmp_path):
     reloaded2 = Library(JsonFileStore(tmp_path / "registry.json"))
     assert reloaded2.book("scan").parser == "fast"
     assert reloaded2.book("scan").chunk_profile == "long"
+
+
+def test_clear_and_delete_topics():
+    lib = Library(InMemoryStore())
+    lib.add_book("a", "Book A", "math")
+    lib.add_topic(book_id="a", title="X", section="1.1")
+    lib.add_topic(book_id="a", title="Y", section="1.2")
+    lib.add_book("b", "Book B", "math")
+    lib.add_topic(book_id="b", title="Z", section="2.1")
+    # delete 1건
+    lib.delete_topic("x")
+    assert len(lib.topics(book_id="a")) == 1
+    # clear 특정 책만
+    n = lib.clear_topics("a")
+    assert n == 1
+    assert lib.topics(book_id="a") == []
+    assert len(lib.topics(book_id="b")) == 1  # 다른 책은 유지
+    # 없는 책은 KeyError
+    with pytest.raises(KeyError, match="unknown book"):
+        lib.clear_topics("missing")
