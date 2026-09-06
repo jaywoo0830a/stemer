@@ -1,15 +1,10 @@
-# Generated indices and caches (fully rebuildable — keep out of git)
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.idea/
+notes/
+books/
 index/
-.cache/
-logs/
-
-# Uploaded book files (large binaries)
-books/inbox/*.pdf
-books/processed/*.pdf
-
-# Local env overrides
-docker/.env
-
-# Local registry DB — markdown exports are the git-tracked copies
-registry.db
-registry.db-*
+*.db
+registry.json

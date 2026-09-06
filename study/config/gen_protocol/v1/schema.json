@@ -1,0 +1,42 @@
+{
+  "version": "v1",
+  "keys": {
+    "core": {
+      "cs": "개념 슬롯 배열",
+      "c": "개념명",
+      "d": "정의",
+      "f": "공식/법칙 (+성립 조건)",
+      "k": "핵심 직관",
+      "m": "자주 하는 오개념",
+      "r": "의사결정 순서 레시피",
+      "as": "응용(실생활/공학 매핑) 배열",
+      "ex": "대표유형(worked example) 배열",
+      "p": "문제 서술",
+      "s": "해설",
+      "pr": "연습문제 (exam: 문자열 배열·풀이 없음 / problems: {lvl,p,s} 객체 배열)"
+    },
+    "subjects": {
+      "math": { "th": "정리", "prf": "증명", "cd": "성립 조건/엣지케이스", "cx": "반례" },
+      "phys": { "law": "법칙", "var": "물리량 표", "case": "극한/근사", "setup": "실험 장치", "sign": "부호 규약" },
+      "chem": { "eq": "균형 반응식", "cond": "반응 조건", "mech": "메커니즘", "spec": "화학종", "trend": "주기 경향", "ox": "산화수" },
+      "bio": { "path": "경로/과정", "cmp": "비교", "cyc": "순환", "tree": "계통", "org": "구조/기관", "exp": "실험 설계" }
+    }
+  },
+  "kinds": {
+    "exam": {
+      "cs": { "type": "array", "max": 3, "fields": { "c": { "budget": 12 }, "d": { "budget": 90 }, "f": { "budget": 70 }, "k": { "budget": 45 }, "m": { "budget": 45 } } },
+      "r": { "type": "string", "budget": 140 },
+      "as": { "type": "array", "max": 3, "budget": 50 },
+      "ex": { "type": "array", "max": 3, "fields": { "p": { "budget": 100 }, "s": { "budget": 160 } } },
+      "pr": { "type": "array", "max": 4, "budget": 70 }
+    },
+    "note": {
+      "cs": { "type": "array", "max": 3, "fields": { "c": { "budget": 12 }, "d": { "budget": 90 }, "f": { "budget": 70 }, "k": { "budget": 45 }, "m": { "budget": 45 } } },
+      "r": { "type": "string", "budget": 140 },
+      "as": { "type": "array", "max": 3, "budget": 50 }
+    },
+    "problems": {
+      "pr": { "type": "array", "max": 12, "fields": { "lvl": { "budget": 4, "allowed": ["b", "a"] }, "p": { "budget": 70 }, "s": { "budget": 140 } } }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+[project]
+name = "study"
+version = "0.3.0"
+description = "교재 RAG 공장 — API 생성 프로토콜 (계약 우선 TDD, 100% JSON)"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
