@@ -102,3 +102,22 @@ def test_reconstruct_keeps_title_case_headings():
     text = "2.4 Modeling of Free Oscillations of a Mass–Spring System\nbody\n"
     out = parse._reconstruct_heads(text)
     assert out.splitlines()[0].startswith("## 2.4 Modeling")
+
+
+def test_clean_glyph_noise_removes_glyph_codes_and_hash_garbage():
+    text = ("1 inch (in.) /H110052.540000 cm\n"
+            "# Á #\n"
+            "## Á\n"
+            "Real body text here.\n")
+    out = parse._clean_glyph_noise(text)
+    assert "/H11005" not in out
+    assert "# Á #" not in out
+    assert "## Á" not in out
+    assert "Real body text here." in out
+
+
+def test_reconstruct_after_glyph_noise_still_promotes_clean_headings():
+    text = "# Á #\n## 1.1 Basic Concepts. Modeling\nbody\n"
+    out = parse._reconstruct_heads(text)
+    assert "# Á #" not in out
+    assert out.splitlines()[0].startswith("## 1.1 Basic Concepts")

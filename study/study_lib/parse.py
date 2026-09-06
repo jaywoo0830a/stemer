@@ -26,6 +26,21 @@ _TOC_MIN = 6       # 이 개수 이상 헤딩 후보면 목차 페이지로 간�
 _MAX_HEAD_LEN = 90
 # 목차 항목은 줄 끝에 페이지 번호(1~4자리)가 붙는다 → 본문 헤딩과 구분
 _PAGE_NUM_TAIL = re.compile(r"\s+\d{1,4}\s*$")
+# pypdf 가 ToUnicode 깨진 폰트에서 뱉는 글리프 코드(/H11005 등) → 제거
+_GLYPH_CODE = re.compile(r"/H\d+")
+_WORDY = re.compile(r"[A-Za-z0-9]")
+
+
+def _clean_glyph_noise(text: str) -> str:
+    """글리프 코드(/H\d+)와 순수 쓰레기 줄 제거 — 폰트 매핑 깨진 PDF 정화."""
+    out: list[str] = []
+    for ln in text.splitlines():
+        s = re.sub(r"\s+", " ", _GLYPH_CODE.sub(" ", ln)).strip()
+        # 대문자 '#'-시작 줄은 pypdf 가 '#' 로 매핑한 깨진 글리프 잔재 → 제거
+        if not s or s == "#" or (s.startswith("#") and not _WORDY.search(s[1:])):
+            continue
+        out.append(s)
+    return "\n".join(out)
 
 
 def _looks_like_prose(title: str) -> bool:
@@ -60,8 +75,9 @@ def _reconstruct_heads(page_text: str) -> str:
     목차 페이지는 승격하지 않는다(가짜 섹션 방지). 또한
     - 줄 끝에 페이지 번호가 붙은 목차 항목
     - 번호 뒤가 본문 문장(소문자 연속)인 줄
-    은 승격하지 않는다.
+    은 승격하지 않는다. 먼저 pypdf 글리프 노이즈(/H 숫자, #-쓰레기)를 제거한다.
     """
+    page_text = _clean_glyph_noise(page_text)
     lines = page_text.splitlines()
     if _looks_like_toc(lines):
         return page_text
