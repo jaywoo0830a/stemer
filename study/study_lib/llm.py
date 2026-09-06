@@ -60,14 +60,19 @@ class LLMClient(Protocol):
 
 def parse_json_content(raw: str) -> Any:
     """모델이 준 JSON 문자열 → 객체. (```json 펜스 허용)."""
-    text = raw.strip()
+    text = (raw or "").strip()
+    if not text:
+        raise LLMError("model returned empty content (no JSON)")
     if text.startswith("```"):
         text = re.sub(r"^```[A-Za-z]*\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
-        raise LLMError(f"model returned invalid JSON: {exc}") from exc
+        snippet = text[:200].replace("\n", " ")
+        raise LLMError(
+            f"model returned invalid JSON: {exc} | raw[:200]={snippet!r}"
+        ) from exc
 
 
 def extract_usage(data: dict) -> Usage:
@@ -137,5 +142,8 @@ class FlashClient:
             raise LLMError(f"API {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
         usage = extract_usage(data)
-        raw = data["choices"][0]["message"]["content"]
+        try:
+            raw = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LLMError(f"unexpected response shape: {str(data)[:300]}") from exc
         return LLMResult(content=parse_json_content(raw), usage=usage)
