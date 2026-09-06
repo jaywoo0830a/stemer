@@ -90,13 +90,14 @@ def build_messages(system: str, user: str) -> list[dict]:
 
 
 class FlashClient:
-    """DeepSeek Flash — OpenAI 호환 /chat/completions. httpx 선택 의존성."""
+    """DeepSeek — OpenAI 호환 /chat/completions. httpx 선택 의존성.
+
+    모델 기본값은 DEEPSEEK_MODEL env (없으면 deepseek-v4-flash).
+    """
 
     def __init__(self, *, model: str | None = None, base_url: str | None = None,
-                 api_key: str | None = None, timeout: float = 120.0) -> None:
-        model = model or os.environ.get("DEEPSEEK_MODEL")
-        if not model:
-            raise LLMError("FlashClient needs a model (param or DEEPSEEK_MODEL env)")
+                 api_key: str | None = None, timeout: float = 60.0) -> None:
+        model = model or os.environ.get("DEEPSEEK_MODEL") or "deepseek-v4-flash"
         api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
         if not api_key:
             raise LLMError("FlashClient needs DEEPSEEK_API_KEY env (or api_key=)")

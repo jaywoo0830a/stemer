@@ -73,19 +73,23 @@ def test_client_interface_with_a_fake_returns_content_and_usage():
     assert result.usage.completion_tokens == 300
 
 
-def test_flash_client_requires_model_and_api_key(monkeypatch):
-    monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+def test_flash_client_requires_api_key(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    with pytest.raises(llm.LLMError, match="model"):
-        FlashClient()
     with pytest.raises(llm.LLMError, match="DEEPSEEK_API_KEY"):
-        FlashClient(model="deepseek-flash")
+        FlashClient()
+
+
+def test_flash_client_defaults_to_v4_flash_model(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    client = FlashClient()
+    assert client._model == "deepseek-v4-flash"
 
 
 @pytest.mark.skipif(importlib.util.find_spec("httpx") is not None,
                     reason="httpx installed")
 def test_flash_client_complete_without_httpx_gives_actionable_error(monkeypatch):
-    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-flash")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
     client = FlashClient()
     with pytest.raises(llm.LLMError, match="httpx"):
