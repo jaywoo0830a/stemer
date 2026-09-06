@@ -234,9 +234,15 @@ def _load_guide(path: str | None, subject: str) -> str:
 
 def _generate(ws: Workspace, args) -> int:
     lib = ws.library()
-    if args.book:
+    if args.topic:
+        topics = [lib.topic(args.topic)]          # 개별 토픽 1건 (상태 무관)
+    elif args.book:
         lib.book(args.book)
-    topics = lib.topics(book_id=args.book, status="todo") if args.book else lib.pending_topics()
+        topics = lib.topics(book_id=args.book, status="todo")
+    else:
+        topics = lib.pending_topics()
+    if args.limit and args.limit > 0:
+        topics = topics[:args.limit]
     if not topics:
         print("no pending topics")
         return 0
@@ -366,6 +372,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     gen = subp("generate")
     gen.add_argument("--book")
+    gen.add_argument("--topic", help="개별 토픽 1건만 생성 (상태 무관)")
+    gen.add_argument("--limit", type=int,
+                     help="todo 토픽 중 앞에서 N개만 생성 (검증용)")
     gen.add_argument("--guide")
     gen.set_defaults(func=_generate)
     return parser
