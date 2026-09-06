@@ -9,4 +9,9 @@
 #   CPU 전용 torch 와 버전 충돌 → "torchvision::nms does not exist".
 #   반드시 docling 설치 전에 CPU 인덱스에서 torch+torchvision 을 먼저 설치할 것:
 #     pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#
+# ★ opencv-headless: docling 이 끌어오는 opencv-python 은 GUI(X11) 라이브러리
+#   (libxcb.so.1 등)를 요구해 slim 이미지에서 ImportError 가 난다.
+#   Dockerfile 이 마지막에 opencv-python-headless 로 강제 교체한다.
 docling>=2.0
+
