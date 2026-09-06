@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import multiprocessing
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -197,7 +198,9 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
             payloads.append(_task(p, bid, profile,
                                   _resolve_profile(library, bid, chunk_profile),
                                   embedder_spec))
-        with multiprocessing.Pool(processes=jobs) as pool:
+        # 컨테이너(pid1·멀티스레드)에서 fork 경고/데드락 회피: STUDY_MP_START=spawn
+        ctx = multiprocessing.get_context(os.environ.get("STUDY_MP_START"))
+        with ctx.Pool(processes=jobs) as pool:
             results = pool.map(_worker_ingest, payloads)
         for res in results:
             _finalize(res, library, store, ingested, failed)

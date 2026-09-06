@@ -1,3 +1,4 @@
 # 실제 임베딩(bge-m3) — torch 포함, 수 GB (64GB 서버 기준 OK)
-# 없으면 인덱싱/생성 파이프라인은 돌지만 검색 품질이 낮아짐(stub 폴백)
+# 서버가 CPU 전용이면 torch 를 CPU 인덱스로 먼저 설치할 것(훨씬 작고 빠름):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
 sentence-transformers>=3

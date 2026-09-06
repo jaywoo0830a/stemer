@@ -72,7 +72,11 @@ class TransformerEmbedder(BaseEmbedder):
                 "pip install 'sentence-transformers'"
             ) from None
         self._model = SentenceTransformer(model, device=device)
-        self.dim = self._model.get_sentence_embedding_dimension()
+        dim_getter = getattr(self._model, "get_embedding_dimension", None)
+        if callable(dim_getter):
+            self.dim = int(dim_getter())          # sentence-transformers 최신 API
+        else:
+            self.dim = int(self._model.get_sentence_embedding_dimension())
 
     def encode(self, texts: list[str]) -> list[Vector]:
         vecs = self._model.encode(texts, normalize_embeddings=True)

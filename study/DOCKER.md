@@ -5,6 +5,7 @@
 ## 0. 전제
 - Docker Engine (서버) 또는 Docker Desktop + **WSL 배포판 통합 활성화**.
 - 이미지 안에서 실행되므로 로컬 파이썬/의존성 불필요.
+- **개발/빠른 확인은 EMBED=0**(torch 없이 수 초 빌드), **실인덱싱은 EMBED=1** 권장.
 
 ## 1. 디렉터리 준비
 ```bash
@@ -17,6 +18,11 @@ cp /path/*.pdf books/math/
 ```bash
 EMBED=1 bash docker/build.sh      # 또는 docker compose build --build-arg EMBED=1
 ```
+
+> **EMBED=1 은 최초 1회가 느립니다**(torch 설치). Dockerfile 은 CPU 전용 torch를
+> 설치하도록 되어 있어 CUDA 버전보다 훨씬 작고 빠릅니다. 그래도 수 분이 걸리므로
+> 서버에서 `nohup bash docker/build.sh &` 로 백그라운드로 돌리고 끝나면 진행하세요.
+> 의존성은 코드와 분리된 레이어라 **한 번 빌드하면 이후 재빌드(코드 변경)는 즉시** 끝납니다.
 
 ## 3. 실행 — 얇은 래퍼
 ```bash

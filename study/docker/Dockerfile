@@ -14,9 +14,14 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # 의존성 레이어 (코드 변경과 분리)
+# 서버는 CPU 전용 → torch 를 CPU 인덱스로 먼저 설치(작고 빠름, CUDA 제외).
+#   EMBED=0: pypdf 만 (빠른 스모크/개발)
+#   EMBED=1: bge-m3 임베딩 포함 (최초 1회는 수 분 소요)
 COPY requirements.txt requirements-embed.txt ./
 RUN pip install --no-cache-dir -r requirements.txt pytest \
-    && if [ "$EMBED" = "1" ]; then pip install --no-cache-dir -r requirements-embed.txt; fi
+    && if [ "$EMBED" = "1" ]; then \
+         pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+         && pip install --no-cache-dir -r requirements-embed.txt; fi
 
 # 코드/구성/테스트
 COPY study_lib ./study_lib
