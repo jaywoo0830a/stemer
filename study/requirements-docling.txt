@@ -2,5 +2,11 @@
 #   텍스트 레이어가 온전한 PDF는 pypdf(fast) 가 훨씬 빠르다.
 #   Cengage/Stewart 처럼 pypdf 가 헤딩 구조를 못 살리는 책에만 사용.
 #   최초 실행 시 레이아웃 모델을 HF 에서 다운로드(수백 MB, HF_ENDPOINT/미러 참고).
-# 참고: CPU 전용 도커에서는 torch 가 EMBED 빌드로 이미 설치돼 있어야 한다.
+#
+# ★ 설치 순서 주의 (Dockerfile DOCLING=1 이 처리):
+#   docling 의 레이아웃 모델(객체탐지)은 torchvision 이 필요하다.
+#   docling 을 pip install 하면 PyPI 기본(CUDA 빌드) torchvision 을 끌어와
+#   CPU 전용 torch 와 버전 충돌 → "torchvision::nms does not exist".
+#   반드시 docling 설치 전에 CPU 인덱스에서 torch+torchvision 을 먼저 설치할 것:
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 docling>=2.0

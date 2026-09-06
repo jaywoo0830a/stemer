@@ -20,13 +20,16 @@ WORKDIR /app
 #   EMBED=0: pypdf 만 (빠른 스모크/개발)
 #   EMBED=1: bge-m3 임베딩 포함 (최초 1회는 수 분 소요)
 #   DOCLING=1: docling 풀 파싱 포함 (매우 무거움 — 복잡 레이아웃/스캔본 전용)
+#   docling 은 레이아웃 모델에 torchvision 이 필요 → docling 설치 전에
+#   torch+torchvision 을 CPU 인덱스에서 먼저 설치해 PyPI CUDA 빌드와 충돌 방지.
 COPY requirements.txt requirements-embed.txt requirements-docling.txt ./
 RUN pip install --no-cache-dir -r requirements.txt pytest \
     && if [ "$EMBED" = "1" ]; then \
          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
          && pip install --no-cache-dir -r requirements-embed.txt; fi \
     && if [ "$DOCLING" = "1" ]; then \
-         pip install --no-cache-dir -r requirements-docling.txt; fi
+         pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+         && pip install --no-cache-dir -r requirements-docling.txt; fi
 
 # 코드/구성/테스트
 COPY study_lib ./study_lib
