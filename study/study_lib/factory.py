@@ -129,7 +129,10 @@ def generate_one(topic: object, *, library: Library, store: object,
                    n_crossref=n_crossref)
     texts = [c.text for c in ctx.chunks]
     if max_tokens is None:
-        max_tokens = _budget_ceiling(schema, kind) + 200
+        # 추론형 모델(deepseek-v4-*)은 reasoning_content 에도 토큰을 쓴다.
+        # 예산 + 200 만으론 reasoning 이 예산을 다 써서 content 가 빈 채로
+        # finish_reason=length 가 된다 → reasoning 여유를 넉넉히 (기본 8000).
+        max_tokens = max(8000, _budget_ceiling(schema, kind) + 4000)
 
     usage = Usage()
     attempts = 0
