@@ -14,6 +14,7 @@ pypdf 는 글자만 뽑을 뿐 **헤딩 구조를 만들지 않으므로**, fast
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -144,20 +145,90 @@ class FastPdfParser:
                           pages=len(pages), source=str(p))
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _docling_threads() -> int:
+    """docling 추론 스레드 수: DOCLING_THREADS 명시 > (전체 코어 - 1)."""
+    explicit = _env_int("DOCLING_THREADS", 0)
+    if explicit > 0:
+        return explicit
+    return max(1, (os.cpu_count() or 4) - 1)
+
+
+def _build_docling_converter():
+    """docling 2.126.0 최적화 DocumentConverter 구성.
+
+    성능 전략 (CPU):
+    - AcceleratorOptions: 전체 코어 사용 (기본 4스레드 한계 제거)
+    - heading_hierarchy: PDF 북마크/번호로 헤딩 레벨 추론 → `## 1.1 제목` 구조
+    - TableFormerMode.FAST: 테이블 속도 우선
+    - OCR/이미지/수식 기본 OFF (텍스트 레이어 PDF는 불필요) — 환경변수로 ON
+    """
+    from docling.datamodel.accelerator_options import (  # type: ignore
+        AcceleratorDevice,
+        AcceleratorOptions,
+    )
+    from docling.datamodel.pipeline_options import (  # type: ignore
+        PdfPipelineOptions,
+        TableFormerMode,
+    )
+    from docling.document_converter import DocumentConverter, PdfFormatOption  # type: ignore
+
+    accel = AcceleratorOptions(num_threads=_docling_threads(),
+                               device=AcceleratorDevice.CPU)
+    opts = PdfPipelineOptions()
+    opts.accelerator_options = accel
+    # 기본값: 텍스트 레이어 PDF 기준 (스캔본은 DOCLING_OCR=1)
+    opts.do_ocr = os.environ.get("DOCLING_OCR", "0") == "1"
+    opts.do_table_structure = os.environ.get("DOCLING_TABLES", "1") != "0"
+    opts.do_formula_enrichment = False
+    opts.do_code_enrichment = False
+    opts.images_scale = 1.0
+    opts.generate_page_images = False
+    opts.generate_picture_images = False
+    # 테이블: 정확도보다 속도 (복잡 테이블은 DOCLING_TABLES_ACCURATE=1)
+    try:
+        if os.environ.get("DOCLING_TABLES_ACCURATE", "0") != "1":
+            opts.table_structure_options.mode = TableFormerMode.FAST
+    except Exception:
+        pass  # 버전 차이 시 기본값 유지
+    # 헤딩 레벨 추론 — discover 가 `## N.N 제목` 구조를 얻는 핵심
+    try:
+        opts.heading_hierarchy_options.enabled = True
+    except Exception:
+        pass  # 버전 차이 시 기본값 유지
+    fmt = PdfFormatOption(pipeline_options=opts)
+    return DocumentConverter(format_options={"pdf": fmt})
+
+
 class DoclingParser:
-    """OCR/VLM 풀 파싱 — 스캔본·수식 지원, 느림(무거운 선택 의존성)."""
+    """docling 풀 파싱 — 복잡 레이아웃/스캔본용 (2.126.0 성능 최적화).
+
+    텍스트 레이어가 온전한 PDF는 profile='fast'(pypdf) 가 훨씬 빠르므로,
+    Cengage/Stewart 처럼 pypdf 가 헤딩 구조를 못 살리는 책에만 사용한다.
+
+    환경변수 (성능/품질 트레이드오프):
+      DOCLING_THREADS          추론 스레드 수 (기본: 전체코어-1)
+      DOCLING_OCR=1            스캔본 OCR 활성화 (기본 off)
+      DOCLING_TABLES=0         테이블 구조 추출 비활성 (속도)
+      DOCLING_TABLES_ACCURATE=1  TableFormer 정확도 모드 (기본 fast)
+    """
     name = "docling"
 
     def parse(self, path: str | Path, *, book_id: str = "") -> ParsedBook:
         if not _has_module("docling"):
             raise RuntimeError(
-                "docling parser needs optional 'docling' (pip install 'docling[vlm]'). "
+                "docling parser needs optional 'docling' (pip install docling). "
                 "텍스트 PDF면 profile='fast' 가 훨씬 빠릅니다."
             )
-        from docling.document_converter import DocumentConverter  # type: ignore
-
         p = Path(path)
-        result = DocumentConverter().convert(str(p))
+        converter = _build_docling_converter()
+        result = converter.convert(str(p))
         markdown = result.document.export_to_markdown()
         return ParsedBook(book_id=book_id or p.stem, title=p.stem, markdown=markdown,
                           parser=self.name, pages=None, source=str(p))

@@ -50,6 +50,23 @@ def test_docling_parser_without_dependency_gives_actionable_error(tmp_path):
         parse.parse_source(p, profile="docling")
 
 
+def test_docling_threads_uses_env_override(monkeypatch):
+    monkeypatch.setenv("DOCLING_THREADS", "6")
+    assert parse._docling_threads() == 6
+
+
+def test_docling_threads_defaults_to_cpu_minus_one(monkeypatch):
+    monkeypatch.delenv("DOCLING_THREADS", raising=False)
+    n = parse._docling_threads()
+    assert n == max(1, (parse.os.cpu_count() or 4) - 1)
+
+
+def test_docling_threads_ignores_invalid_env(monkeypatch):
+    monkeypatch.setenv("DOCLING_THREADS", "abc")
+    n = parse._docling_threads()
+    assert n == max(1, (parse.os.cpu_count() or 4) - 1)
+
+
 # ---- 헤딩 재구성 (fast 파서가 만드는 구조) ----
 
 def test_reconstruct_promotes_dotted_number_heading():
