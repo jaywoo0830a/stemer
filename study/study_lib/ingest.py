@@ -262,6 +262,10 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
                 if on_report:
                     on_report(report)
     else:
+        # 순차 경로: 워커용 캡을 안 거치므로 compose 의 OMP 캡(2)이 남아
+        # bge-m3 가 2스레드로 도는 문제 → 전체 코어로 재설정 후 embedder 생성
+        # (torch 는 embedder 생성 시 lazy import → env 설정이 유효)
+        _cap_worker_threads(os.cpu_count() or 1)
         embedder = _make_embedder(embedder_spec)
         for p in tasks:
             bid = slugify(p.stem)
