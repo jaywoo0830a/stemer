@@ -86,6 +86,26 @@ def test_flash_client_defaults_to_v4_flash_model(monkeypatch):
     assert client._model == "deepseek-v4-flash"
 
 
+def test_flash_client_defaults_reasoning_to_low(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.delenv("DEEPSEEK_REASONING_EFFORT", raising=False)
+    client = FlashClient()
+    assert client._reasoning_effort == "low"
+
+
+def test_flash_client_reads_reasoning_effort_env(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setenv("DEEPSEEK_REASONING_EFFORT", "high")
+    assert FlashClient()._reasoning_effort == "high"
+
+
+def test_flash_client_rejects_bad_reasoning_effort(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setenv("DEEPSEEK_REASONING_EFFORT", "ultra")
+    with pytest.raises(llm.LLMError, match="reasoning_effort"):
+        FlashClient()
+
+
 @pytest.mark.skipif(importlib.util.find_spec("httpx") is not None,
                     reason="httpx installed")
 def test_flash_client_complete_without_httpx_gives_actionable_error(monkeypatch):
