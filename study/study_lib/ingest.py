@@ -164,7 +164,8 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
                subject: str = "math", profile: str | None = None,
                embedder_spec: tuple = ("auto",), force: bool = False,
                jobs: int = 1, chunk_profile: ChunkProfile | None = None,
-               figures_registry=None) -> BatchReport:
+               figures_registry=None,
+               on_report: Callable[[IngestReport], None] | None = None) -> BatchReport:
     """클라이언트 진입점 — 폴더 배치 인제스트."""
     dirp = Path(directory)
     if not dirp.is_dir():
@@ -189,8 +190,7 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
             tasks.append(p)
     library.save()
 
-    # ② 실행 (병렬 or 직렬) → 결과 수집
-    results: list[dict] = []
+    # ② 실행 (병렬 or 직렬) → 책 단위 완료 즉시 커밋 + 콜백(진행 가시화)
     if jobs > 1 and len(tasks) > 1:
         payloads = []
         for p in tasks:
@@ -201,9 +201,11 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
         # 컨테이너(pid1·멀티스레드)에서 fork 경고/데드락 회피: STUDY_MP_START=spawn
         ctx = multiprocessing.get_context(os.environ.get("STUDY_MP_START"))
         with ctx.Pool(processes=jobs) as pool:
-            results = pool.map(_worker_ingest, payloads)
-        for res in results:
-            _finalize(res, library, store, ingested, failed)
+            for res in pool.imap_unordered(_worker_ingest, payloads):
+                report = _finalize(res, library, store)
+                (ingested if report.ok else failed).append(report)
+                if on_report:
+                    on_report(report)
     else:
         embedder = _make_embedder(embedder_spec)
         for p in tasks:
@@ -213,19 +215,20 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
                                 chunk_profile=chunk_profile,
                                 figures_registry=figures_registry)
             (ingested if report.ok else failed).append(report)
+            if on_report:
+                on_report(report)
     return BatchReport(ingested=tuple(ingested), skipped=tuple(skipped),
                        failed=tuple(failed))
 
 
-def _finalize(res: dict, library: Library, store: IndexStore,
-              ingested: list, failed: list) -> None:
+def _finalize(res: dict, library: Library, store: IndexStore) -> IngestReport:
+    """워커 결과를 커밋하고 IngestReport 로 반환한다 (책 단위)."""
     bid = res["book_id"]
     if res["ok"]:
         _commit_ok(library, store, bid, res["chunks"], res["vectors"],
                    res["parser"], res["pages"])
-        ingested.append(IngestReport(book_id=bid, ok=True, chunks=len(res["chunks"]),
-                                     parser=res["parser"], pages=res["pages"]))
-    else:
-        library.set_book_error(bid, res["error"])
-        library.save()
-        failed.append(IngestReport(book_id=bid, ok=False, error=res["error"]))
+        return IngestReport(book_id=bid, ok=True, chunks=len(res["chunks"]),
+                            parser=res["parser"], pages=res["pages"])
+    library.set_book_error(bid, res["error"])
+    library.save()
+    return IngestReport(book_id=bid, ok=False, error=res["error"])

@@ -144,16 +144,21 @@ def _index(ws: Workspace, args) -> int:
 def _ingest(ws: Workspace, args) -> int:
     spec = ("stub",) if args.embedder == "stub" else ("auto",)
     chunk_profile = load_profile(args.chunk_profile) if args.chunk_profile else None
+
+    def report_line(report) -> None:
+        if report.ok:
+            print(f"ingested {report.book_id}: {report.chunks} chunks "
+                  f"(parser={report.parser})", flush=True)
+        else:
+            print(f"failed   {report.book_id}: {report.error}",
+                  file=sys.stderr, flush=True)
+
     report = ingest_dir(args.directory, library=ws.library(), store=ws.open_store(),
                         subject=args.subject, profile=args.profile,
                         embedder_spec=spec, force=args.force, jobs=args.jobs,
-                        chunk_profile=chunk_profile)
-    for r in report.ingested:
-        print(f"ingested {r.book_id}: {r.chunks} chunks (parser={r.parser})")
+                        chunk_profile=chunk_profile, on_report=report_line)
     for bid in report.skipped:
         print(f"skip     {bid} (already indexed)")
-    for r in report.failed:
-        print(f"failed   {r.book_id}: {r.error}", file=sys.stderr)
     print(report.summary())
     return 1 if report.failed else 0
 
