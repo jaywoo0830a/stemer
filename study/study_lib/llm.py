@@ -98,12 +98,16 @@ class FlashClient:
     """DeepSeek — OpenAI 호환 /chat/completions. httpx 선택 의존성.
 
     모델 기본값은 DEEPSEEK_MODEL env (없으면 deepseek-v4-flash).
-    reasoning 수준은 DEEPSEEK_REASONING_EFFORT env (기본 low):
-    low/high/max — 낮출수록 추론 토큰(비용) 감소, 답변은 더 직관적.
+
+    구조화 JSON 생성은 자유 추론이 불필요하므로 기본적으로 thinking 을 끈다
+    (reasoning_content 토큰/비용 절감 + finish_reason=length 로 content 가
+    비는 문제 방지). DEEPSEEK_THINKING=1 이면 켜고, 수준은
+    DEEPSEEK_REASONING_EFFORT(low/high/max) 로 조절.
     """
 
     def __init__(self, *, model: str | None = None, base_url: str | None = None,
                  api_key: str | None = None, timeout: float = 60.0,
+                 thinking: bool | None = None,
                  reasoning_effort: str | None = None) -> None:
         model = model or os.environ.get("DEEPSEEK_MODEL") or "deepseek-v4-flash"
         api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
@@ -118,6 +122,9 @@ class FlashClient:
         self._api_key = api_key
         self._timeout = timeout
         self._reasoning_effort = effort
+        if thinking is None:
+            thinking = os.environ.get("DEEPSEEK_THINKING", "0") == "1"
+        self._thinking = thinking
 
     def complete(self, *, system: str, user: str, max_tokens: int = 1000,
                  json_object: bool = True) -> LLMResult:
@@ -132,10 +139,12 @@ class FlashClient:
             "max_tokens": max_tokens,
             "temperature": 0.2,
             "stream": False,
-            # v4 추론형: effort 를 낮춰 reasoning 토큰(비용) 절감
-            "thinking": {"type": "enabled"},
-            "reasoning_effort": self._reasoning_effort,
         }
+        # 구조화 JSON: 기본 thinking off (비용/빈 content 방지).
+        # 켜면 reasoning_content 가 생성되어 max_tokens 를 넉넉히 잡아야 한다.
+        body["thinking"] = {"type": "enabled" if self._thinking else "disabled"}
+        if self._thinking:
+            body["reasoning_effort"] = self._reasoning_effort
         if json_object:
             body["response_format"] = {"type": "json_object"}
 

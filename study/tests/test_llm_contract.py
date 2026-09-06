@@ -86,6 +86,18 @@ def test_flash_client_defaults_to_v4_flash_model(monkeypatch):
     assert client._model == "deepseek-v4-flash"
 
 
+def test_flash_client_thinking_defaults_off(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.delenv("DEEPSEEK_THINKING", raising=False)
+    assert FlashClient()._thinking is False
+
+
+def test_flash_client_thinking_env_turns_on(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setenv("DEEPSEEK_THINKING", "1")
+    assert FlashClient()._thinking is True
+
+
 def test_flash_client_defaults_reasoning_to_low(monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
     monkeypatch.delenv("DEEPSEEK_REASONING_EFFORT", raising=False)
