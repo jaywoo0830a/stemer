@@ -18,6 +18,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from .chunk import ChunkProfile, chunk_markdown
 from .embed import StubEmbedder, TransformerEmbedder
@@ -91,9 +92,23 @@ def _make_embedder(spec: tuple):
 
 
 def _task(path: Path, book_id: str, profile: str | None,
-          chunk_profile: ChunkProfile | None, embedder_spec: tuple) -> dict:
+          chunk_profile: ChunkProfile | None, embedder_spec: tuple,
+          threads: int) -> dict:
     return {"path": str(path), "book_id": book_id, "profile": profile,
-            "chunk_profile": chunk_profile, "embedder_spec": embedder_spec}
+            "chunk_profile": chunk_profile, "embedder_spec": embedder_spec,
+            "threads": threads}
+
+
+def _cap_worker_threads(threads: int) -> None:
+    """CPU oversubscription(livelock) 방지: torch/OMP 스레드 상한을 env 로 보장.
+
+    spawn 워커는 torch 를 여기서 처음 import 하므로, env 를 먼저 설정하면
+    워커당 스레드 수가 `threads` 로 고정된다 (compose env 에 의존하지 않음).
+    """
+    threads = max(1, int(threads))
+    os.environ["OMP_NUM_THREADS"] = str(threads)
+    os.environ["MKL_NUM_THREADS"] = str(threads)
+    os.environ["OPENBLAS_NUM_THREADS"] = str(threads)
 
 
 def _guard_quality(parsed) -> None:
@@ -116,6 +131,8 @@ def _resolve_profile(library: Library, book_id: str, explicit: ChunkProfile | No
 def _worker_ingest(payload: dict) -> dict:
     """워커: 파싱→청킹→임베딩만 수행(진행 로그 출력). 저장/registry 는 부모가 한다."""
     bid = payload["book_id"]
+    # torch/OMP 스레드 상한을 import 전에 보장 (oversubscription → livelock 방지)
+    _cap_worker_threads(payload.get("threads") or 1)
     try:
         parsed = parse_source(payload["path"], profile=payload["profile"], book_id=bid)
         _guard_quality(parsed)
@@ -221,12 +238,15 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
 
     # ② 실행 (병렬 or 직렬) → 책 단위 완료 즉시 커밋 + 콜백(진행 가시화)
     if jobs > 1 and len(tasks) > 1:
+        # 워커가 몇 개든 총 스레드 ≤ CPU 논리스레드 가 되도록 배분
+        cpus = os.cpu_count() or 1
+        thr = max(1, cpus // jobs)
         payloads = []
         for p in tasks:
             bid = slugify(p.stem)
             payloads.append(_task(p, bid, profile,
                                   _resolve_profile(library, bid, chunk_profile),
-                                  embedder_spec))
+                                  embedder_spec, thr))
         # 컨테이너(pid1·멀티스레드)에서 fork 경고/데드락 회피: STUDY_MP_START=spawn
         ctx = multiprocessing.get_context(os.environ.get("STUDY_MP_START"))
         with ctx.Pool(processes=jobs) as pool:
