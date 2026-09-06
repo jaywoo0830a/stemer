@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -28,22 +29,24 @@ from .store import IndexStore
 
 _EXTS = {".pdf", ".md", ".txt"}
 
-EMBED_LOG_EVERY = 200   # 임베딩 진행 로그 주기(청크 수)
+EMBED_LOG_EVERY = 50   # 임베딩 진행 로그 주기(청크 수) — CPU 인코딩은 느려 200은 너무 듬성
 EMBED_BATCH = 32        # 워커당 임베딩 배치
 
 
 def _embed_with_progress(embedder, texts: list, label: str,
                          log: Callable[[str], None] | None) -> list:
-    """배치 단위 임베딩 + 진행 로그 (조용한 임베딩 단계 가시화)."""
+    """배치 단위 임베딩 + 진행 로그(경과시간 포함) — 멈춤 vs 느림 구분용."""
     out: list = []
     total = len(texts)
+    t0 = time.monotonic()
     if log:
         log(f"[{label}] embed 0/{total}")
     for start in range(0, total, EMBED_BATCH):
         end = min(start + EMBED_BATCH, total)
         out.extend(embedder.embed_texts(texts[start:end], batch_size=EMBED_BATCH))
         if log and (end == total or end % EMBED_LOG_EVERY == 0):
-            log(f"[{label}] embed {end}/{total}")
+            el = time.monotonic() - t0
+            log(f"[{label}] embed {end}/{total} (+{el:.0f}s)")
     return out
 
 
