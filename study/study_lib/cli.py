@@ -25,7 +25,7 @@ from .embed import StubEmbedder, TransformerEmbedder
 from .factory import generate_one
 from .ingest import ingest_dir
 from .llm import FlashClient, LLMError
-from .parse import parse_source
+from .parse import parse_source, parser_names
 from .profiles import load_profile, profile_names
 from .protocol import load_schema
 from .registry import INDEXED, JsonFileStore, Library
@@ -60,7 +60,7 @@ def _resolve_embedder(kind: str):
 def _books_add(ws: Workspace, args) -> int:
     lib = ws.library()
     lib.add_book(args.id, args.title, args.subject, source=args.source or "",
-                 chunk_profile=args.chunk_profile)
+                 parser=args.parser, chunk_profile=args.chunk_profile)
     lib.save()
     print(f"added book {args.id}")
     return 0
@@ -69,7 +69,16 @@ def _books_add(ws: Workspace, args) -> int:
 def _books_list(ws: Workspace, args) -> int:
     lib = ws.library()
     for b in lib.books():
-        print(f"{b.book_id:<16} {b.subject:<6} {b.status:<10} {b.title}")
+        p = b.parser or "auto"
+        print(f"{b.book_id:<16} {b.subject:<6} {b.status:<10} parser={p:<8} {b.title}")
+    return 0
+
+
+def _books_set_parser(ws: Workspace, args) -> int:
+    lib = ws.library()
+    lib.set_book_parser(args.book, args.parser)
+    lib.save()
+    print(f"set parser for {args.book} -> {args.parser or 'auto'}")
     return 0
 
 
@@ -235,10 +244,15 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--title", required=True)
     pa.add_argument("--subject", required=True)
     pa.add_argument("--source")
+    pa.add_argument("--parser", choices=list(parser_names()))
     pa.add_argument("--chunk-profile", choices=list(profile_names()))
     pa.set_defaults(func=_books_add)
     pl = bs.add_parser("list", parents=[common])
     pl.set_defaults(func=_books_list)
+    psp = bs.add_parser("set-parser", parents=[common])
+    psp.add_argument("--book", required=True)
+    psp.add_argument("--parser", choices=list(parser_names()))
+    psp.set_defaults(func=_books_set_parser)
 
     p = subp("topics")
     ts = p.add_subparsers(dest="action", required=True)
@@ -276,7 +290,8 @@ def build_parser() -> argparse.ArgumentParser:
     ing = subp("ingest")
     ing.add_argument("directory")
     ing.add_argument("--subject", default="math", choices=list(SUBJECTS))
-    ing.add_argument("--profile", choices=["text", "fast", "docling"])
+    ing.add_argument("--profile", choices=list(parser_names()),
+                     help="파서 기본값(folder). 책별 books set-parser 지정이 우선.")
     ing.add_argument("--jobs", type=int, default=1)
     ing.add_argument("--chunk-profile", choices=list(profile_names()))
     ing.add_argument("--force", action="store_true")

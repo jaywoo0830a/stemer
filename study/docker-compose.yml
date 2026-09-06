@@ -6,6 +6,7 @@ services:
       dockerfile: docker/Dockerfile
       args:
         EMBED: ${EMBED:-0}
+        DOCLING: ${DOCLING:-0}
     volumes:
       - ./books:/books          # 입력 PDF 폴더 (호스트 study/books)
       - ./data:/data            # 영속: registry.json / store/ / notes/

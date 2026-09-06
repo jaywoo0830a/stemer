@@ -131,6 +131,14 @@ def _resolve_profile(library: Library, book_id: str, explicit: ChunkProfile | No
     return load_profile(name) if name else None
 
 
+def _resolve_parser(library: Library, book_id: str, explicit: str | None) -> str | None:
+    """책별 파서 결정: 책.parser > CLI 기본(폴더) > None(확장자 추론)."""
+    book_parser = library.book(book_id).parser
+    if book_parser:
+        return book_parser
+    return explicit
+
+
 def _worker_ingest(payload: dict) -> dict:
     """워커: 파싱→청킹→임베딩만 수행(진행 로그 출력). 저장/registry 는 부모가 한다."""
     bid = payload["book_id"]
@@ -182,7 +190,8 @@ def ingest_one(path: str | Path, *, library: Library, store: IndexStore,
         library.add_book(bid, p.stem, "math", source=p.name)
         library.save()
     try:
-        parsed = parse_source(p, profile=profile, book_id=bid)
+        parser = _resolve_parser(library, bid, profile)
+        parsed = parse_source(p, profile=parser, book_id=bid)
         _guard_quality(parsed)
         profile_obj = _resolve_profile(library, bid, chunk_profile)
         chunks = chunk_markdown(parsed.markdown, book_id=bid, profile=profile_obj)
@@ -234,7 +243,7 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
         try:
             book = library.book(bid)
         except KeyError:
-            library.add_book(bid, p.stem, subject, source=p.name)
+            library.add_book(bid, p.stem, subject, source=p.name, parser=profile)
             book = library.book(bid)
         if book.status == INDEXED and not force:
             skipped.append(bid)
@@ -250,7 +259,7 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
         payloads = []
         for p in tasks:
             bid = slugify(p.stem)
-            payloads.append(_task(p, bid, profile,
+            payloads.append(_task(p, bid, _resolve_parser(library, bid, profile),
                                   _resolve_profile(library, bid, chunk_profile),
                                   embedder_spec, thr))
         # 컨테이너(pid1·멀티스레드)에서 fork 경고/데드락 회피: STUDY_MP_START=spawn

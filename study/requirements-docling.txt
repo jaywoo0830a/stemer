@@ -1,0 +1,6 @@
+# docling 풀 파싱(OCR/VLM 레이아웃 분석) — 매우 무거움, 복잡한 교재 레이아웃용
+#   텍스트 레이어가 온전한 PDF는 pypdf(fast) 가 훨씬 빠르다.
+#   Cengage/Stewart 처럼 pypdf 가 헤딩 구조를 못 살리는 책에만 사용.
+#   최초 실행 시 레이아웃 모델을 HF 에서 다운로드(수백 MB, HF_ENDPOINT/미러 참고).
+# 참고: CPU 전용 도커에서는 torch 가 EMBED 빌드로 이미 설치돼 있어야 한다.
+docling>=2.0

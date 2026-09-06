@@ -48,6 +48,7 @@ class Book:
     title: str
     subject: str
     source: str = ""
+    parser: str | None = None      # 파서 프로필: "fast"/"docling"/"text" (None=추론)
     chunk_profile: str | None = None
     status: str = PENDING
     error: str = ""
@@ -131,13 +132,26 @@ class Library:
 
     # ---- 책 ----
     def add_book(self, book_id: str, title: str, subject: str, *, source: str = "",
+                 parser: str | None = None,
                  chunk_profile: str | None = None) -> Book:
         if book_id in self._state.books:
             raise ValueError(f"book {book_id!r} already exists")
         require_subject(subject)
         book = Book(book_id=book_id, title=title, subject=subject, source=source,
-                    chunk_profile=chunk_profile)
+                    parser=parser, chunk_profile=chunk_profile)
         self._state.books[book_id] = book
+        return book
+
+    def set_book_parser(self, book_id: str, parser: str | None) -> Book:
+        """책별 파서 프로필 지정/변경 (None 이면 확장자 추론)."""
+        book = self.book(book_id)
+        book.parser = parser
+        return book
+
+    def set_book_chunk_profile(self, book_id: str, profile: str | None) -> Book:
+        """책별 청크 프로필 지정/변경 (None 이면 기본 프로필)."""
+        book = self.book(book_id)
+        book.chunk_profile = profile
         return book
 
     def book(self, book_id: str) -> Book:

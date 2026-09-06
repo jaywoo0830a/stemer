@@ -92,3 +92,22 @@ def test_json_file_store_roundtrips_state(tmp_path):
 def test_slugify_makes_safe_topic_ids():
     assert slugify("Normal distribution") == "normal-distribution"
     assert slugify("  Multi   Word  Title  ") == "multi-word-title"
+
+
+def test_book_parser_field_and_setters_roundtrip(tmp_path):
+    # given: 파서·청크 프로필을 명시해 책 등록
+    lib = Library(JsonFileStore(tmp_path / "registry.json"))
+    lib.add_book("scan", "Scanned Physics", subject="phys", parser="docling",
+                 chunk_profile="compact")
+    # then: 저장/로드 후에도 책별 파서·청크 프로필이 보존된다
+    lib.save()
+    reloaded = Library(JsonFileStore(tmp_path / "registry.json"))
+    assert reloaded.book("scan").parser == "docling"
+    assert reloaded.book("scan").chunk_profile == "compact"
+    # when: 책별 파서/청크 프로필을 변경
+    reloaded.set_book_parser("scan", "fast")
+    reloaded.set_book_chunk_profile("scan", "long")
+    reloaded.save()
+    reloaded2 = Library(JsonFileStore(tmp_path / "registry.json"))
+    assert reloaded2.book("scan").parser == "fast"
+    assert reloaded2.book("scan").chunk_profile == "long"

@@ -174,6 +174,11 @@ _EXT_DEFAULT = {".txt": "text", ".md": "text", ".pdf": "fast"}
 MIN_CHARS_PER_PAGE = 150
 
 
+def parser_names() -> tuple[str, ...]:
+    """등록된 파서 프로필 이름 목록 (CLI choices/검증용)."""
+    return tuple(PARSER_PROFILES)
+
+
 def detect_scanned(parsed: ParsedBook, min_chars_per_page: int = MIN_CHARS_PER_PAGE) -> bool:
     """페이지 수 대비 추출 텍스트가 너무 적으면 스캔본 의심 (품질 게이트)."""
     if parsed.pages is None or parsed.pages <= 0:

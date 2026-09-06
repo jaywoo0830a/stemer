@@ -103,3 +103,38 @@ def test_ingest_dir_rejects_missing_directory(tmp_path):
     except ValueError:
         raised = True
     assert raised
+
+
+def test_ingest_respects_per_book_parser_precedence(tmp_path, monkeypatch):
+    """책.parser(사용자 지정) > CLI 기본(폴더) — 책마다 다른 파서 적용."""
+    import study_lib.ingest as ingest_mod
+    from study_lib.registry import InMemoryStore
+
+    lib = Library(InMemoryStore())
+    lib.add_book("scanned", "Scanned", subject="math", parser="docling")
+    lib.add_book("plain", "Plain", subject="math", parser=None)  # 기본값 사용
+    lib.save()
+    store = IndexStore(JsonDurableSink(tmp_path / "store"))
+
+    src = tmp_path / "books"
+    src.mkdir()
+    _write(src, "scanned.md", _good_body("1.1 A", "Scanned content."))
+    _write(src, "plain.md", _good_body("1.2 B", "Plain content."))
+
+    seen: dict[str, str | None] = {}
+
+    def fake_parse_source(path, *, profile=None, book_id=""):
+        from study_lib.parse import ParsedBook
+        seen[book_id] = profile
+        return ParsedBook(book_id=book_id or Path(path).stem,
+                          title=Path(path).stem,
+                          markdown=Path(path).read_text(encoding="utf-8"),
+                          parser=profile or "text", pages=None)
+
+    monkeypatch.setattr(ingest_mod, "parse_source", fake_parse_source)
+    report = ingest_dir(src, library=lib, store=store, embedder_spec=SPEC,
+                        profile="fast", jobs=1)
+    assert report.summary() == "ingested=2 skipped=0 failed=0"
+    # 책별 파서가 CLI 기본(fast)보다 우선
+    assert seen["scanned"] == "docling"
+    assert seen["plain"] == "fast"
