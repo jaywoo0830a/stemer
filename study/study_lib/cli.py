@@ -1,0 +1,245 @@
+"""cli — study_lib 위의 얇은 CLI 래퍼.
+
+사용 예:
+    python -m study_lib.cli books add --id calc --title Calculus --subject math
+    python -m study_lib.cli books list
+    python -m study_lib.cli topics add --book calc --title "Limit of a sequence" --section 3.5
+    python -m study_lib.cli topics set <topic> --status draft
+    python -m study_lib.cli index book.md --book calc --profile text --embedder stub
+    python -m study_lib.cli status
+    python -m study_lib.cli generate --book calc
+
+공통 경로: --registry(registry.json) --store(store/) --notes(notes/) — env STUDY_* 로도 지정.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+from .chunk import chunk_markdown
+from .embed import StubEmbedder, TransformerEmbedder
+from .factory import generate_one
+from .llm import FlashClient, LLMError
+from .parse import parse_source
+from .protocol import load_schema
+from .registry import INDEXED, JsonFileStore, Library
+from .store import IndexStore, JsonDurableSink
+
+
+@dataclass
+class Workspace:
+    registry: str
+    store: str
+    notes: str
+
+    def library(self) -> Library:
+        return Library(JsonFileStore(self.registry))
+
+    def open_store(self) -> IndexStore:
+        return IndexStore(JsonDurableSink(self.store))
+
+
+def _resolve_embedder(kind: str):
+    if kind == "stub":
+        return StubEmbedder()
+    try:
+        return TransformerEmbedder()
+    except Exception as exc:  # 무거운 모델 없으면 오프라인/개발용 stub 폴백
+        print(f"note: {exc}; falling back to StubEmbedder", file=sys.stderr)
+        return StubEmbedder()
+
+
+# ---- books ----
+def _books_add(ws: Workspace, args) -> int:
+    lib = ws.library()
+    lib.add_book(args.id, args.title, args.subject, source=args.source or "")
+    lib.save()
+    print(f"added book {args.id}")
+    return 0
+
+
+def _books_list(ws: Workspace, args) -> int:
+    lib = ws.library()
+    for b in lib.books():
+        print(f"{b.book_id:<16} {b.subject:<6} {b.status:<10} {b.title}")
+    return 0
+
+
+# ---- topics ----
+def _topics_add(ws: Workspace, args) -> int:
+    lib = ws.library()
+    topic = lib.add_topic(book_id=args.book, title=args.title, kind=args.kind,
+                          section=args.section)
+    lib.save()
+    print(f"added topic {topic.topic_id}")
+    return 0
+
+
+def _topics_list(ws: Workspace, args) -> int:
+    lib = ws.library()
+    for t in lib.topics(book_id=args.book, status=args.status):
+        print(f"{t.status:<8} {t.topic_id:<40} book={t.book_id} kind={t.kind}")
+    return 0
+
+
+def _topics_set(ws: Workspace, args) -> int:
+    lib = ws.library()
+    lib.set_status(args.topic, args.status)
+    lib.save()
+    print(f"set {args.topic} -> {args.status}")
+    return 0
+
+
+# ---- status ----
+def _status(ws: Workspace, args) -> int:
+    lib = ws.library()
+    books, topics = lib.books(), lib.topics()
+    print(f"books={len(books)} topics={len(topics)} pending_topics={len(lib.pending_topics())}")
+    for t in topics:
+        print(f"  {t.status:<8} {t.topic_id}  ({t.book_id})")
+    return 0
+
+
+# ---- index ----
+def _index(ws: Workspace, args) -> int:
+    lib = ws.library()
+    lib.book(args.book)  # 미등록 책이면 KeyError → main 이 안내
+    parsed = parse_source(args.path, profile=args.profile, book_id=args.book)
+    chunks = chunk_markdown(parsed.markdown, book_id=args.book)
+    if not chunks:
+        raise ValueError(f"no chunks extracted from {args.path}")
+    embedder = _resolve_embedder(args.embedder)
+    vectors = embedder.embed_texts([c.text for c in chunks])
+    store = ws.open_store()
+    store.add_many(chunks, vectors=vectors)
+    store.flush(args.book)
+    lib.set_book_status(args.book, INDEXED)
+    lib.save()
+    pages = parsed.pages if parsed.pages is not None else "-"
+    print(f"indexed {args.book}: {len(chunks)} chunks (parser={parsed.parser}, pages={pages})")
+    return 0
+
+
+# ---- generate ----
+def default_guide_path(subject: str) -> Path:
+    """과목 가이드(B) 기본 위치: <repo>/guides/<subject>.md (cwd 무관)."""
+    return Path(__file__).resolve().parent.parent / "guides" / f"{subject}.md"
+
+
+def _load_guide(path: str | None, subject: str) -> str:
+    if path:
+        return Path(path).read_text(encoding="utf-8")
+    guide = default_guide_path(subject)
+    return guide.read_text(encoding="utf-8") if guide.exists() else ""
+
+
+def _generate(ws: Workspace, args) -> int:
+    lib = ws.library()
+    if args.book:
+        lib.book(args.book)
+    topics = lib.topics(book_id=args.book, status="todo") if args.book else lib.pending_topics()
+    if not topics:
+        print("no pending topics")
+        return 0
+
+    store = ws.open_store()
+    store.load_all()
+    schema = load_schema()
+    embedder = _resolve_embedder(args.embedder)
+    llm = FlashClient()  # 설정 누락 시 LLMError → main 이 안내
+    guide = _load_guide(args.guide, topics[0].subject)
+
+    done = failed = 0
+    total_cost = 0.0
+    for topic in topics:
+        res = generate_one(topic, library=lib, store=store, embedder=embedder, llm=llm,
+                           schema=schema, guide=guide, notes_dir=ws.notes)
+        total_cost += res.usage.cost_usd()
+        if res.status == "draft":
+            done += 1
+            print(f"draft  {topic.topic_id} -> {res.note_path}")
+        else:
+            failed += 1
+            print(f"failed {topic.topic_id}: {'; '.join(res.issues[:2])}", file=sys.stderr)
+    print(f"done={done} failed={failed} total_cost=${total_cost:.4f}")
+    return 1 if failed else 0
+
+
+# ---- parser ----
+def _common():
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--registry", default=os.environ.get("STUDY_REGISTRY", "registry.json"))
+    p.add_argument("--store", default=os.environ.get("STUDY_STORE", "store"))
+    p.add_argument("--notes", default=os.environ.get("STUDY_NOTES", "notes"))
+    p.add_argument("--embedder", default="auto", choices=["auto", "stub"])
+    return p
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="study")
+    sub = parser.add_subparsers(dest="command", required=True)
+    common = _common()
+
+    def subp(name):
+        return sub.add_parser(name, parents=[common])
+
+    p = subp("books")
+    bs = p.add_subparsers(dest="action", required=True)
+    pa = bs.add_parser("add", parents=[common])
+    pa.add_argument("--id", required=True)
+    pa.add_argument("--title", required=True)
+    pa.add_argument("--subject", required=True)
+    pa.add_argument("--source")
+    pa.set_defaults(func=_books_add)
+    pl = bs.add_parser("list", parents=[common])
+    pl.set_defaults(func=_books_list)
+
+    p = subp("topics")
+    ts = p.add_subparsers(dest="action", required=True)
+    ta = ts.add_parser("add", parents=[common])
+    ta.add_argument("--book", required=True)
+    ta.add_argument("--title", required=True)
+    ta.add_argument("--kind", default="exam", choices=["exam", "note", "problems"])
+    ta.add_argument("--section")
+    ta.set_defaults(func=_topics_add)
+    tl = ts.add_parser("list", parents=[common])
+    tl.add_argument("--book")
+    tl.add_argument("--status", choices=["todo", "draft", "review", "done"])
+    tl.set_defaults(func=_topics_list)
+    tset = ts.add_parser("set", parents=[common])
+    tset.add_argument("topic")
+    tset.add_argument("--status", required=True,
+                      choices=["todo", "draft", "review", "done"])
+    tset.set_defaults(func=_topics_set)
+
+    st = subp("status")
+    st.set_defaults(func=_status)
+
+    ix = subp("index")
+    ix.add_argument("path")
+    ix.add_argument("--book", required=True)
+    ix.add_argument("--profile", choices=["text", "fast", "docling"])
+    ix.set_defaults(func=_index)
+
+    gen = subp("generate")
+    gen.add_argument("--book")
+    gen.add_argument("--guide")
+    gen.set_defaults(func=_generate)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    ws = Workspace(args.registry, args.store, args.notes)
+    try:
+        return args.func(ws, args)
+    except (KeyError, ValueError, LLMError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

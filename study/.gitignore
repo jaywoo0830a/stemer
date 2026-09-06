@@ -6,5 +6,10 @@ __pycache__/
 notes/
 books/
 index/
+store/
+store/
 *.db
 registry.json
+pilot/registry.json
+pilot/store/
+pilot/notes/

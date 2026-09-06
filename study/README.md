@@ -29,4 +29,15 @@ python3 -m pytest -q        # 계약(contract) 테스트 — 호스트에서 무
 - `study_lib.render` — 검증된 payload → 최종 마크다운 (구조·라벨·번호는 템플릿 소유) (Slice 8)
 - `study_lib.figures` — FigureRegistry(교재 원본만)·figures_for(섹션)·attach_figures (Slice 9)
 - `study_lib.factory` — generate_one: retrieve→prompt→llm→검증→patch(≤2)→render→저장→draft (Slice 10)
+- `study_lib.cli` — 얇은 CLI 래퍼: books/topics/status/index/generate (Slice 11)
 - `study_lib.tokens` — 공용 토큰 추정 척도
+
+## CLI
+
+```bash
+python -m study_lib.cli books add --id calc --title Calculus --subject math
+python -m study_lib.cli topics add --book calc --title "Limit of a sequence" --section 3.5
+python -m study_lib.cli index book.md --book calc --profile text --embedder stub
+python -m study_lib.cli status
+python -m study_lib.cli generate --book calc
+```
