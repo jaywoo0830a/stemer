@@ -81,3 +81,24 @@ def test_reconstruct_ignores_long_or_lowercase_lines():
             + "1.2 " + "x" * 200 + "\n")
     out = parse._reconstruct_heads(text)
     assert "## " not in out
+
+
+def test_reconstruct_ignores_toc_entry_with_trailing_page_number():
+    # 목차 조각: 헤딩처럼 보이지만 줄 끝에 페이지 번호가 붙음 → 승격 금지
+    text = "25.4 Testing Hypotheses. Decisions 1077\nbody\n"
+    out = parse._reconstruct_heads(text)
+    assert "## 25.4" not in out
+
+
+def test_reconstruct_ignores_prose_sentence_fragment():
+    # 본문 문장: 번호 뒤 소문자 단어 연속 → 오탐 금지
+    text = "1.06 US quart) is vibrating up and down under the\nbody\n"
+    out = parse._reconstruct_heads(text)
+    assert "## 1.06" not in out
+
+
+def test_reconstruct_keeps_title_case_headings():
+    # 전치사 소문자가 섞여도 Title Case 비율이 높으면 승격
+    text = "2.4 Modeling of Free Oscillations of a Mass–Spring System\nbody\n"
+    out = parse._reconstruct_heads(text)
+    assert out.splitlines()[0].startswith("## 2.4 Modeling")

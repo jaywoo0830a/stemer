@@ -24,6 +24,22 @@ _NUM_HEAD_RE = re.compile(r"^\s*\d+(?:\.\d+)+\.?\s+[A-Z]")
 _NUM_HEAD_ONLY_RE = re.compile(r"^\s*\d+(?:\.\d+)+\.?\s+[A-Z].{0,80}$")
 _TOC_MIN = 6       # 이 개수 이상 헤딩 후보면 목차 페이지로 간주
 _MAX_HEAD_LEN = 90
+# 목차 항목은 줄 끝에 페이지 번호(1~4자리)가 붙는다 → 본문 헤딩과 구분
+_PAGE_NUM_TAIL = re.compile(r"\s+\d{1,4}\s*$")
+
+
+def _looks_like_prose(title: str) -> bool:
+    """번호 뒤 제목이 본문 문장처럼 보이는가? (오탐 필터)
+
+    진짜 제목은 Title Case(첫 단어 제외 대문자 비율 높음). 본문 문장은
+    소문자 단어가 연속된다: "US quart) is vibrating up and down under the".
+    """
+    words = title.split()
+    if len(words) < 3:
+        return False
+    rest = words[1:]
+    caps = sum(1 for w in rest if w[:1].isupper())
+    return caps / len(rest) < 0.5
 
 
 def _looks_like_toc(lines: list[str]) -> bool:
@@ -41,8 +57,10 @@ def _looks_like_toc(lines: list[str]) -> bool:
 def _reconstruct_heads(page_text: str) -> str:
     """페이지 텍스트에서 `1.1 제목` 형태 줄을 `## 헤딩`으로 승격.
 
-    목차 페이지는 승격하지 않는다(가짜 섹션 방지). 헤딩은 줄 시작에
-    점 번호 + 공백 + 대문자/숫자로 시작하고 길이가 짧아야 한다.
+    목차 페이지는 승격하지 않는다(가짜 섹션 방지). 또한
+    - 줄 끝에 페이지 번호가 붙은 목차 항목
+    - 번호 뒤가 본문 문장(소문자 연속)인 줄
+    은 승격하지 않는다.
     """
     lines = page_text.splitlines()
     if _looks_like_toc(lines):
@@ -50,7 +68,9 @@ def _reconstruct_heads(page_text: str) -> str:
     out: list[str] = []
     for ln in lines:
         s = ln.strip()
-        if s and len(s) <= _MAX_HEAD_LEN and _NUM_HEAD_RE.match(s):
+        if (s and len(s) <= _MAX_HEAD_LEN and _NUM_HEAD_RE.match(s)
+                and not _PAGE_NUM_TAIL.search(s)
+                and not _looks_like_prose(s)):
             out.append("## " + s)
         else:
             out.append(ln)
