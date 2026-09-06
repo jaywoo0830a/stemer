@@ -60,7 +60,8 @@ def _resolve_embedder(kind: str):
 def _books_add(ws: Workspace, args) -> int:
     lib = ws.library()
     lib.add_book(args.id, args.title, args.subject, source=args.source or "",
-                 parser=args.parser, chunk_profile=args.chunk_profile)
+                 parser=args.parser, chunk_profile=args.chunk_profile,
+                 page_range=args.page_range)
     lib.save()
     print(f"added book {args.id}")
     return 0
@@ -70,7 +71,9 @@ def _books_list(ws: Workspace, args) -> int:
     lib = ws.library()
     for b in lib.books():
         p = b.parser or "auto"
-        print(f"{b.book_id:<16} {b.subject:<6} {b.status:<10} parser={p:<8} {b.title}")
+        pr = b.page_range or "all"
+        print(f"{b.book_id:<16} {b.subject:<6} {b.status:<10} parser={p:<8} "
+              f"pages={pr:<10} {b.title}")
     return 0
 
 
@@ -79,6 +82,14 @@ def _books_set_parser(ws: Workspace, args) -> int:
     lib.set_book_parser(args.book, args.parser)
     lib.save()
     print(f"set parser for {args.book} -> {args.parser or 'auto'}")
+    return 0
+
+
+def _books_set_page_range(ws: Workspace, args) -> int:
+    lib = ws.library()
+    lib.set_book_page_range(args.book, args.range_)
+    lib.save()
+    print(f"set page_range for {args.book} -> {args.range_ or 'all'}")
     return 0
 
 
@@ -165,7 +176,7 @@ def _ingest(ws: Workspace, args) -> int:
     report = ingest_dir(args.directory, library=ws.library(), store=ws.open_store(),
                         subject=args.subject, profile=args.profile,
                         embedder_spec=spec, force=args.force, jobs=args.jobs,
-                        chunk_profile=chunk_profile,
+                        chunk_profile=chunk_profile, page_range=args.page_range,
                         log=lambda msg: print(msg, flush=True),
                         on_report=report_line)
     for bid in report.skipped:
@@ -246,6 +257,7 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--source")
     pa.add_argument("--parser", choices=list(parser_names()))
     pa.add_argument("--chunk-profile", choices=list(profile_names()))
+    pa.add_argument("--page-range", help="파싱할 페이지 범위 '42-1249' (1-based, 전체=비움)")
     pa.set_defaults(func=_books_add)
     pl = bs.add_parser("list", parents=[common])
     pl.set_defaults(func=_books_list)
@@ -253,6 +265,11 @@ def build_parser() -> argparse.ArgumentParser:
     psp.add_argument("--book", required=True)
     psp.add_argument("--parser", choices=list(parser_names()))
     psp.set_defaults(func=_books_set_parser)
+    psr = bs.add_parser("set-page-range", parents=[common])
+    psr.add_argument("--book", required=True)
+    psr.add_argument("--range", dest="range_",
+                     help="페이지 범위 '42-1249' (1-based) — 전체로 되돌리려면 빈 값/생략")
+    psr.set_defaults(func=_books_set_page_range)
 
     p = subp("topics")
     ts = p.add_subparsers(dest="action", required=True)
@@ -294,6 +311,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="파서 기본값(folder). 책별 books set-parser 지정이 우선.")
     ing.add_argument("--jobs", type=int, default=1)
     ing.add_argument("--chunk-profile", choices=list(profile_names()))
+    ing.add_argument("--page-range",
+                     help="신규 등록 책들의 파싱 페이지 범위 '42-1249' (기존 책은 set-page-range)")
     ing.add_argument("--force", action="store_true")
     ing.set_defaults(func=_ingest)
 

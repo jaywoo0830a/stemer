@@ -50,6 +50,9 @@ class Book:
     source: str = ""
     parser: str | None = None      # 파서 프로필: "fast"/"docling"/"text" (None=추론)
     chunk_profile: str | None = None
+    # 페이지 범위 (1-based inclusive, "42-1249") — None 이면 전체.
+    # 초입부/부록 제외하고 핵심 본문만 파싱할 때 사용 (docling page_range).
+    page_range: str | None = None
     status: str = PENDING
     error: str = ""
     added_at: str = field(default_factory=_now)
@@ -133,12 +136,13 @@ class Library:
     # ---- 책 ----
     def add_book(self, book_id: str, title: str, subject: str, *, source: str = "",
                  parser: str | None = None,
-                 chunk_profile: str | None = None) -> Book:
+                 chunk_profile: str | None = None,
+                 page_range: str | None = None) -> Book:
         if book_id in self._state.books:
             raise ValueError(f"book {book_id!r} already exists")
         require_subject(subject)
         book = Book(book_id=book_id, title=title, subject=subject, source=source,
-                    parser=parser, chunk_profile=chunk_profile)
+                    parser=parser, chunk_profile=chunk_profile, page_range=page_range)
         self._state.books[book_id] = book
         return book
 
@@ -146,6 +150,12 @@ class Library:
         """책별 파서 프로필 지정/변경 (None 이면 확장자 추론)."""
         book = self.book(book_id)
         book.parser = parser
+        return book
+
+    def set_book_page_range(self, book_id: str, page_range: str | None) -> Book:
+        """책별 페이지 범위 지정/변경. '42-1249' (1-based inclusive) 또는 None=전체."""
+        book = self.book(book_id)
+        book.page_range = page_range
         return book
 
     def set_book_chunk_profile(self, book_id: str, profile: str | None) -> Book:

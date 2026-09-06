@@ -82,6 +82,22 @@ def test_docling_threads_env_override_wins_over_omp(monkeypatch):
     assert parse._docling_threads() == 8
 
 
+def test_parse_page_range_parses_inclusive_range():
+    assert parse.parse_page_range("42-1249") == (42, 1249)
+    assert parse.parse_page_range("1-10") == (1, 10)
+    assert parse.parse_page_range(None) is None
+    assert parse.parse_page_range("") is None
+
+
+def test_parse_page_range_rejects_bad_input():
+    with pytest.raises(ValueError, match="page_range"):
+        parse.parse_page_range("42-10")     # start > end
+    with pytest.raises(ValueError, match="page_range"):
+        parse.parse_page_range("0-10")      # start < 1
+    with pytest.raises(ValueError, match="page_range"):
+        parse.parse_page_range("abc")
+
+
 # ---- 헤딩 재구성 (fast 파서가 만드는 구조) ----
 
 def test_reconstruct_promotes_dotted_number_heading():

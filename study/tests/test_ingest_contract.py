@@ -123,7 +123,7 @@ def test_ingest_respects_per_book_parser_precedence(tmp_path, monkeypatch):
 
     seen: dict[str, str | None] = {}
 
-    def fake_parse_source(path, *, profile=None, book_id=""):
+    def fake_parse_source(path, *, profile=None, book_id="", page_range=None):
         from study_lib.parse import ParsedBook
         seen[book_id] = profile
         return ParsedBook(book_id=book_id or Path(path).stem,
@@ -138,3 +138,33 @@ def test_ingest_respects_per_book_parser_precedence(tmp_path, monkeypatch):
     # 책별 파서가 CLI 기본(fast)보다 우선
     assert seen["scanned"] == "docling"
     assert seen["plain"] == "fast"
+
+
+def test_ingest_respects_per_book_page_range(tmp_path, monkeypatch):
+    """책별 page_range 가 parse_source 로 전달된다 (docling 부분 파싱)."""
+    import study_lib.ingest as ingest_mod
+    from study_lib.registry import InMemoryStore
+
+    lib = Library(InMemoryStore())
+    lib.add_book("book-a", "Book A", subject="math", parser="docling",
+                 page_range="42-1249")
+    lib.save()
+    store = IndexStore(JsonDurableSink(tmp_path / "store"))
+    src = tmp_path / "books"
+    src.mkdir()
+    _write(src, "book-a.md", _good_body("1.1 A", "Content A."))
+
+    seen: dict[str, object] = {}
+
+    def fake_parse_source(path, *, profile=None, book_id="", page_range=None):
+        from study_lib.parse import ParsedBook
+        seen["page_range"] = page_range
+        return ParsedBook(book_id=book_id or Path(path).stem,
+                          title=Path(path).stem,
+                          markdown=Path(path).read_text(encoding="utf-8"),
+                          parser=profile or "text", pages=None)
+
+    monkeypatch.setattr(ingest_mod, "parse_source", fake_parse_source)
+    report = ingest_dir(src, library=lib, store=store, embedder_spec=SPEC, jobs=1)
+    assert report.summary() == "ingested=1 skipped=0 failed=0"
+    assert seen["page_range"] == "42-1249"

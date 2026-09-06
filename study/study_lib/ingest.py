@@ -96,10 +96,10 @@ def _make_embedder(spec: tuple):
 
 def _task(path: Path, book_id: str, profile: str | None,
           chunk_profile: ChunkProfile | None, embedder_spec: tuple,
-          threads: int) -> dict:
+          threads: int, page_range: str | None = None) -> dict:
     return {"path": str(path), "book_id": book_id, "profile": profile,
             "chunk_profile": chunk_profile, "embedder_spec": embedder_spec,
-            "threads": threads}
+            "threads": threads, "page_range": page_range}
 
 
 def _cap_worker_threads(threads: int) -> None:
@@ -139,13 +139,19 @@ def _resolve_parser(library: Library, book_id: str, explicit: str | None) -> str
     return explicit
 
 
+def _book_page_range(library: Library, book_id: str) -> str | None:
+    """책에 저장된 페이지 범위(예: '42-1249') — 없으면 None(전체)."""
+    return library.book(book_id).page_range
+
+
 def _worker_ingest(payload: dict) -> dict:
     """워커: 파싱→청킹→임베딩만 수행(진행 로그 출력). 저장/registry 는 부모가 한다."""
     bid = payload["book_id"]
     # torch/OMP 스레드 상한을 import 전에 보장 (oversubscription → livelock 방지)
     _cap_worker_threads(payload.get("threads") or 1)
     try:
-        parsed = parse_source(payload["path"], profile=payload["profile"], book_id=bid)
+        parsed = parse_source(payload["path"], profile=payload["profile"], book_id=bid,
+                              page_range=payload.get("page_range"))
         _guard_quality(parsed)
         chunks = chunk_markdown(parsed.markdown, book_id=bid,
                                 profile=payload["chunk_profile"])
@@ -191,7 +197,8 @@ def ingest_one(path: str | Path, *, library: Library, store: IndexStore,
         library.save()
     try:
         parser = _resolve_parser(library, bid, profile)
-        parsed = parse_source(p, profile=parser, book_id=bid)
+        parsed = parse_source(p, profile=parser, book_id=bid,
+                              page_range=_book_page_range(library, bid))
         _guard_quality(parsed)
         profile_obj = _resolve_profile(library, bid, chunk_profile)
         chunks = chunk_markdown(parsed.markdown, book_id=bid, profile=profile_obj)
@@ -225,6 +232,7 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
                subject: str = "math", profile: str | None = None,
                embedder_spec: tuple = ("auto",), force: bool = False,
                jobs: int = 1, chunk_profile: ChunkProfile | None = None,
+               page_range: str | None = None,
                figures_registry=None, log: Callable[[str], None] | None = None,
                on_report: Callable[[IngestReport], None] | None = None) -> BatchReport:
     """클라이언트 진입점 — 폴더 배치 인제스트."""
@@ -243,7 +251,8 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
         try:
             book = library.book(bid)
         except KeyError:
-            library.add_book(bid, p.stem, subject, source=p.name, parser=profile)
+            library.add_book(bid, p.stem, subject, source=p.name, parser=profile,
+                             page_range=page_range)
             book = library.book(bid)
         if book.status == INDEXED and not force:
             skipped.append(bid)
@@ -261,7 +270,8 @@ def ingest_dir(directory: str | Path, *, library: Library, store: IndexStore,
             bid = slugify(p.stem)
             payloads.append(_task(p, bid, _resolve_parser(library, bid, profile),
                                   _resolve_profile(library, bid, chunk_profile),
-                                  embedder_spec, thr))
+                                  embedder_spec, thr,
+                                  _book_page_range(library, bid)))
         # 컨테이너(pid1·멀티스레드)에서 fork 경고/데드락 회피: STUDY_MP_START=spawn
         ctx = multiprocessing.get_context(os.environ.get("STUDY_MP_START"))
         with ctx.Pool(processes=jobs) as pool:

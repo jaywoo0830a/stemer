@@ -66,7 +66,7 @@ def test_ingest_registers_parsed_figures(tmp_path, monkeypatch):
         figures=(Figure("f1", "", "3.5", "img/f1.png", "Sketch"),),
     )
     monkeypatch.setattr(ingest_mod, "parse_source",
-                        lambda path, profile=None, book_id="": parsed)
+                        lambda path, profile=None, book_id="", page_range=None: parsed)
     store = IndexStore(JsonDurableSink(tmp_path / "store"))
     registry = FigureRegistry()
     report = ingest_one(src, library=lib, store=store, embedder=StubEmbedder(),

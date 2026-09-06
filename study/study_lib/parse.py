@@ -108,17 +108,33 @@ class ParsedBook:
 class Parser(Protocol):
     name: str
 
-    def parse(self, path: str | Path, *, book_id: str = "") -> ParsedBook: ...
+    def parse(self, path: str | Path, *, book_id: str = "",
+              page_range: tuple[int, int] | None = None) -> ParsedBook: ...
 
 
 def _has_module(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
+def parse_page_range(spec: str | None) -> tuple[int, int] | None:
+    """'42-1249' (1-based inclusive) → (42, 1249). None/빈 값 → None(전체)."""
+    if not spec:
+        return None
+    s = str(spec).strip()
+    m = re.fullmatch(r"(\d+)\s*-\s*(\d+)", s)
+    if not m:
+        raise ValueError(f"invalid page_range {spec!r}; expected 'start-end' (1-based)")
+    start, end = int(m.group(1)), int(m.group(2))
+    if start < 1 or end < start:
+        raise ValueError(f"invalid page_range {spec!r}; need 1 <= start <= end")
+    return (start, end)
+
+
 class TextParser:
     name = "text"
 
-    def parse(self, path: str | Path, *, book_id: str = "") -> ParsedBook:
+    def parse(self, path: str | Path, *, book_id: str = "",
+              page_range: tuple[int, int] | None = None) -> ParsedBook:
         p = Path(path)
         markdown = p.read_text(encoding="utf-8")
         return ParsedBook(book_id=book_id or p.stem, title=p.stem, markdown=markdown,
@@ -129,7 +145,8 @@ class FastPdfParser:
     """텍스트 레이어 PDF 전용 — 빠르지만 스캔본은 내용이 안 나온다."""
     name = "fast"
 
-    def parse(self, path: str | Path, *, book_id: str = "") -> ParsedBook:
+    def parse(self, path: str | Path, *, book_id: str = "",
+              page_range: tuple[int, int] | None = None) -> ParsedBook:
         if not _has_module("pypdf"):
             raise RuntimeError(
                 "fast PDF parser needs 'pypdf' (pip install pypdf). "
@@ -139,7 +156,16 @@ class FastPdfParser:
 
         p = Path(path)
         reader = pypdf.PdfReader(str(p))
-        pages = [_reconstruct_heads(page.extract_text() or "") for page in reader.pages]
+        raw_pages = [page.extract_text() or "" for page in reader.pages]
+        total = len(raw_pages)
+        if page_range is not None:
+            start, end = page_range
+            if end > total:
+                end = total
+            if start > total:
+                start, end = total, total
+            raw_pages = raw_pages[start - 1:end]
+        pages = [_reconstruct_heads(t) for t in raw_pages]
         return ParsedBook(book_id=book_id or p.stem, title=p.stem,
                           markdown="\n\n".join(pages), parser=self.name,
                           pages=len(pages), source=str(p))
@@ -228,7 +254,8 @@ class DoclingParser:
     """
     name = "docling"
 
-    def parse(self, path: str | Path, *, book_id: str = "") -> ParsedBook:
+    def parse(self, path: str | Path, *, book_id: str = "",
+              page_range: tuple[int, int] | None = None) -> ParsedBook:
         if not _has_module("docling"):
             raise RuntimeError(
                 "docling parser needs optional 'docling' (pip install docling). "
@@ -236,7 +263,10 @@ class DoclingParser:
             )
         p = Path(path)
         converter = _build_docling_converter()
-        result = converter.convert(str(p))
+        kwargs = {}
+        if page_range is not None:
+            kwargs["page_range"] = page_range   # (start, end) 1-based inclusive
+        result = converter.convert(str(p), **kwargs)
         markdown = result.document.export_to_markdown()
         return ParsedBook(book_id=book_id or p.stem, title=p.stem, markdown=markdown,
                           parser=self.name, pages=None, source=str(p))
@@ -286,7 +316,13 @@ def resolve_profile(path: str | Path | None, profile: str | None = None) -> str:
 
 
 def parse_source(path: str | Path, *, profile: str | None = None,
-                 book_id: str = "") -> ParsedBook:
-    """클라이언트가 쓰는 진입점 — 파일 → ParsedBook."""
+                 book_id: str = "",
+                 page_range: str | tuple[int, int] | None = None) -> ParsedBook:
+    """클라이언트가 쓰는 진입점 — 파일 → ParsedBook.
+
+    page_range: '42-1249'(1-based inclusive) 문자열 또는 (start, end) 튜플.
+    """
     name = resolve_profile(path, profile)
-    return get_parser(name).parse(path, book_id=book_id)
+    if isinstance(page_range, str):
+        page_range = parse_page_range(page_range)
+    return get_parser(name).parse(path, book_id=book_id, page_range=page_range)
