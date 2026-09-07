@@ -160,94 +160,102 @@ _HEADER = (
 # PART_ORDER 순서로 병합한다.
 PART_ORDER = ("concept", "examples", "practice")
 
-# 각 언어·부분별 분리 프롬프트. system 은 해당 부분 "만" 쓰게 하고,
-# user 끝맺음은 언어 글쓰기 지시가 담긴다(아래 LANGUAGE_KICK).
+# ---- 공통 최상 품질 표준(DeepSeek-R1-Distill-Qwen-32B 등 강 추론 모델용) ----
+# 아래 _STD 는 모든 부분 앞에 붙는 원칙이다. 본문 언어는 _LANGUAGE_KICK 으로 정한다
+# (지시 자체는 영어로 써도 강 모델은 잘 따른다). 목표: 기술적으로 틀림 없고, 왜 그
+# 단계인지 설명하며, 예제·문제가 '진짜 훈련'이 되는 약 14k 토큰급 교재.
+_STD = (
+    "You are a rigorous university math tutor writing material that a motivated student "
+    "can study WITHOUT the textbook open. Every claim must be checkable from your words "
+    "and the cited passage; when a theorem is used you must state and verify its "
+    "HYPOTHESES (e.g. 'f is continuous on [1,∞), positive, and decreasing' BEFORE applying "
+    "the Integral Test).\n"
+    "Language: prose should flow like a good lecturer -- never a bullet dump -- yet every "
+    "logical step must be explicit.\n"
+    "Math: write ALL mathematics in LaTeX inside $...$ (inline) or $$...$$ (display). Do "
+    "not leave a bare symbol outside dollars. Use \\sum, \\int, \\frac, \\lim, \\sqrt "
+    "properly; no plain-text math.\n"
+    "Notation must be introduced before use and reused consistently. State the result at "
+    "the end of each worked item in a boxed/emphasised form (e.g. '**Answer.** $S=...$').\n"
+    "Ground in the given passages: quote or paraphrase, and cite inline the way the "
+    "passage labels items -- e.g. (textbook EXAMPLE 3), (11.3 Exercises #7) -- or mark "
+    "genuinely new items as (extension).\n"
+    "Never write anything mathematically false. If you are not fully certain of a numeric "
+    "fact, do the arithmetic carefully in the working and show it.\n"
+)
+
+# 부분별 작업 지시. 평문은 부분 '만' 출력한다.
 _PARTS = {
-    "en": {
-        "concept": (
-            "You are an expert math tutor. Write ONLY the concept/lecture part of a study "
-            "note for ONE topic -- a flowing, readable explanation section titled "
-            "'## Reading the Topic.'\n"
-            "Cover: what the idea is for, the intuition, precise definitions, why each key "
-            "formula holds (derive or motivate it), and ONE common student mistake to avoid. "
-            "Ground everything in the given textbook passages and cite inline like "
-            "(textbook EXAMPLE 3) or (11.3 Exercises #7).\n"
-            "Math in $...$ / $$...$$. Do NOT include examples, practice problems, or solutions "
-            "here -- that is a separate part."
-        ),
-        "examples": (
-            "You are an expert math tutor. Write ONLY the worked-examples part of a study note "
-            "for ONE topic, titled '## Worked examples.'\n"
-            "Give AT LEAST 3, preferably 4-5, examples of rising difficulty: a basic/template "
-            "case, a typical exam-style case, and an application/word problem (invent a "
-            "plausible labelled extension only if the passage lacks one).\n"
-            "For EACH example give the FULL step-by-step **Solution.:** explain every "
-            "algebraic/calculus move line by line (which rule and why), not just the final "
-            "answer, and state the conclusion. Reference the textbook source inline when it "
-            "matches. Math in $...$ / $$...$$."
-        ),
-        "practice": (
-            "You are an expert math tutor. Write ONLY the practice-problems part of a study "
-            "note for ONE topic, titled '## Practice problems.'\n"
-            "Give AT LEAST 5 problems ordered by rising difficulty, spanning the key formula "
-            "uses for this topic. Right after each problem give a FULLY WORKED **Solution.:** "
-            "with all steps and the final answer (built-in answer key). Never leave a problem "
-            "without its solved answer. Where a problem matches the textbook, cite like "
-            "(11.3 Exercises #7). Math in $...$ / $$...$$."
-        ),
-    },
-    "ko": {
-        "concept": (
-            "You are an expert math tutor. Write ONLY the concept/lecture part of a study note "
-            "for ONE topic -- a flowing, readable explanation section titled "
-            "'## Reading the Topic.'\n"
-            "Cover: what the idea is for, the intuition, precise definitions, why each key "
-            "formula holds (derive or motivate it), and ONE common student mistake to avoid. "
-            "Ground everything in the given textbook passages and cite inline like "
-            "(textbook EXAMPLE 3) or (11.3 Exercises #7).\n"
-            "Math in $...$ / $$...$$. Do NOT include examples, practice problems, or solutions "
-            "here -- that is a separate part."
-        ),
-        "examples": (
-            "You are an expert math tutor. Write ONLY the worked-examples part of a study note "
-            "for ONE topic, titled '## Worked examples.'\n"
-            "Give AT LEAST 3, preferably 4-5, examples of rising difficulty: a basic/template "
-            "case, a typical exam-style case, and an application/word problem (invent a "
-            "plausible labelled extension only if the passage lacks one).\n"
-            "For EACH example give the FULL step-by-step **Solution.:** explain every "
-            "algebraic/calculus move line by line (which rule and why), not just the final "
-            "answer, and state the conclusion. Reference the textbook source inline when it "
-            "matches. Math in $...$ / $$...$$."
-        ),
-        "practice": (
-            "You are an expert math tutor. Write ONLY the practice-problems part of a study "
-            "note for ONE topic, titled '## Practice problems.'\n"
-            "Give AT LEAST 5 problems ordered by rising difficulty, spanning the key formula "
-            "uses for this topic. Right after each problem give a FULLY WORKED **Solution.:** "
-            "with all steps and the final answer (built-in answer key). Never leave a problem "
-            "without its solved answer. Where a problem matches the textbook, cite like "
-            "(11.3 Exercises #7). Math in $...$ / $$...$$."
-        ),
-    },
+    "concept": (
+        "Write ONLY the concept/lecture part of the study note: a section titled "
+        "'## Reading the Topic'.\n"
+        "Give a connected lecture (several paragraphs, not a box list) that:\n"
+        "1. MOTIVATES: the concrete question the idea answers and why a student should care.\n"
+        "2. BUILDS INTUITION first, then gives the precise definition(s) and theorem(s) with "
+        "   the exact hypotheses and what each hypothesis is FOR.\n"
+        "3. Justifies every key formula: either a short derivation or a clear reason it holds "
+        "   (name the ingredient, e.g. 'this is just the limit definition of the integral').\n"
+        "4. Shows one worked non-example or the single most common student misconception and "
+        "   why it is wrong.\n"
+        "5. Tells the reader 'what to check' before using the tool (a compact procedure box).\n"
+        "No solved practice items go here; that is a separate part. End with a short "
+        "'You are ready when...' self-check list."
+    ),
+    "examples": (
+        "Write ONLY the worked-examples part: a section titled '## Worked examples'.\n"
+        "Provide 4-6 examples of clear increasing difficulty and variety:\n"
+        "  (i) one template/basic case, "
+        "(ii) one typical exam-style case with a trap or a common wrong turn, "
+        "(iii) one case requiring combining two techniques, and "
+        "(iv) one application / word problem (invent a plausible labelled extension only if "
+        "the passage provides no such problem).\n"
+        "Format each example as:\n"
+        "  ### Example N (source tag)\n"
+        "  **Problem.** precise statement in one or two sentences.\n"
+        "  **Solution.** a complete, line-by-line derivation: name each rule/step as you use "
+        "it (e.g. 'substitute u=...', 'compare with p-series p=3/2>1'), verify any theorem "
+        "hypotheses explicitly, do the algebra/integral/limit in displayed steps, then give "
+        "the emphasised **Answer.** -- nothing left to the reader's imagination.\n"
+        "Add ONE short 'why this step matters' remark to at least two examples to teach "
+        "technique, not just answers."
+    ),
+    "practice": (
+        "Write ONLY the practice-problems part: a section titled '## Practice problems'\n"
+        "The problems are a graduated training set with a BUILT-IN FULL ANSWER KEY (this "
+        "note doubles as the solution manual):\n"
+        "Provide 6-10 problems ordered from routine to challenging. Across the set, cover "
+        "every technique/formula introduced for this topic, and label each problem's "
+        "difficulty '[basic]', '[standard]', '[challenge]' and its skill (e.g. computational / "
+        "conceptual / proof / application).\n"
+        "Format each as:\n"
+        "  ### Problem N (difficulty · skill, source tag)\n"
+        "  **Problem.** precise wording, no ambiguity about what is asked.\n"
+        "  (leave a short blank '**Work area.**' line)\n"
+        "  **Solution.** the complete worked answer: state the method, verify hypotheses, "
+        "show every step in displayed math, and end with the final **Answer.**.\n"
+        "Make the [challenge] items genuinely require care (a proof, a counterexample, or a "
+        "multi-step synthesis) -- not just bigger numbers. Do not strand any problem without "
+        "its solved answer."
+    ),
 }
 
-# 유저 프롬프트 언어 지시 (en/ko  글꼴): 본문/해설만 해당 언어로.
+# 유저 프롬프트 언어 지시: 본문 해설 언어만 결정 (en/ko).
 _LANGUAGE_KICK = {
     "en": (
-        "Write the study note, presenting all prose and solutions in English. "
-        "Finish every example/problem completely -- do not truncate.\n"
-        "Output exactly the requested part as markdown body only (no YAML header)."
+        "Present all prose, explanations, and solutions in English. Output exactly the "
+        "requested part as clean markdown body only (no YAML header). Do not truncate -- "
+        "finish every example and every solution completely before stopping."
     ),
     "ko": (
-        "Write the study note, presenting all prose and solutions in Korean "
-        "(math stays as symbols/LaTeX). Finish every example/problem completely -- "
-        "do not truncate.\n"
-        "Output exactly the requested part as markdown body only (no YAML header)."
+        "Present all prose, explanations, and solutions in Korean (mathematical symbols and "
+        "LaTeX stay as-is). Output exactly the requested part as clean markdown body only "
+        "(no YAML header). Do not truncate -- finish every example and every solution "
+        "completely before stopping."
     ),
 }
 
-# 각 부분의 최대 생성 토큰 (개념은 짧게, 연습·풀이는 길게).
-_PART_MAX = {"concept": 5000, "examples": 12000, "practice": 16000}
+# 각 부분의 최대 생성 토큰. 세 부분 합계 ≈ 3000+5500+6500 ≈ 15k 토큰(강 모델·정성용).
+_PART_MAX = {"concept": 4000, "examples": 7000, "practice": 8000}
 
 
 def _part_user(topic, passages, lang: str, part: str) -> str:
@@ -262,6 +270,11 @@ def _part_user(topic, passages, lang: str, part: str) -> str:
         topic=topic.title or topic.topic_id,
         book=topic.book_id, section=topic.section or "-",
         subject=topic.subject, passages=src, kick=_LANGUAGE_KICK[lang])
+
+
+def _part_system(part: str) -> str:
+    """부분 시스템 프롬프트 = 공통 품질 표준 + 해당 부분 작업 지시."""
+    return _STD + "\n" + _PARTS[part]
 
 
 def _read_part_file(base: Path, topic_id: str, part: str) -> str | None:
@@ -290,7 +303,7 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
     part_bodies: dict[str, str] = {}
     # 새로 생성할 부분
     for part in parts:
-        sysp = _PARTS[lang][part]
+        sysp = _part_system(part)
         usrp = _part_user(topic, passages, lang, part)
         res = llm.complete(system=sysp, user=usrp,
                            max_tokens=_PART_MAX.get(part, 8000),
