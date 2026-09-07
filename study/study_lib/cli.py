@@ -33,6 +33,12 @@ from .registry import INDEXED, JsonFileStore, Library
 from .store import IndexStore, JsonDurableSink
 from .subjects import SUBJECTS
 from .postproc_katex import default_ollama_client, guard_ok, postkatex_if_enabled
+from .problembank import (
+    OllamaTextLLM,
+    build_bank_verified,
+    problem_bank_path,
+)
+from .retrieve import retrieve
 
 
 @dataclass
@@ -322,6 +328,47 @@ def _postkatex_cmd(ws: Workspace, args) -> int:
     return 0
 
 
+# ---- problembank (교재 passage → 난이도별 문제은행, 별도 .problems.md 파일) ----
+def _problembank_cmd(ws: Workspace, args) -> int:
+    """토픽의 개념 note는 그대로 두고, 교재 passage기반 10/5/5 문제은행을
+    notes/<topic>.problems.md 에 생성한다. 사용 LLM = 로컬(Ollama; gemma 태그 ok)."""
+    topic_id = args.topic
+    lib = ws.library()
+    topic = lib.topic(topic_id)
+    note = topic.note_path
+    if not note or not Path(note).exists():
+        print(f"no concept note for {topic_id} (run generate --topic first)",
+              file=sys.stderr)
+        return 1
+
+    # 교재 passage: 토픽/책 store에서 retrieve
+    store = ws.open_store()
+    store.load_all()
+    embedder = _resolve_embedder(args.embedder)
+    ctx = retrieve(topic, store=store, embedder=embedder)
+    passages = ctx.texts()
+    if not passages:
+        print(f"no grounded passages in store for {topic_id} "
+              f"(accumulate/book indexed?)", file=sys.stderr)
+        return 1
+
+    client = default_ollama_client()
+    print(f"[problembank] model={client.model} host={client.base_url} "
+          f"topic={topic_id} passages={len(passages)}")
+    llm = OllamaTextLLM(client)
+    bank = build_bank_verified(
+        passages, llm, topic_title=topic.title or topic_id, attempts=args.retry)
+    if not bank:
+        print(f"failed: could not produce a valid basic10/inter5/advanced5 bank "
+              f"(각 항목 출처+전체 풀이 필요)", file=sys.stderr)
+        return 1
+    out_path = Path(problem_bank_path(note))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(bank + "\n", encoding="utf-8")
+    print(f"wrote {out_path} ({len(bank)} chars, concept note untouched)")
+    return 0
+
+
 # ---- chapter focus (챕터 단위 소규모 재인제스트) ----
 # 챕터는 사용자가 직접 페이지 범위(--range)로 지정한다.
 # EXAMPLES:  python -m study_lib.cli chapter focus --book calc --range 42-90
@@ -538,6 +585,13 @@ def build_parser() -> argparse.ArgumentParser:
     pk.add_argument("--verbose", action="store_true",
                     help="가드 거절 사유 + 후보 앞부분 출력 (진단)")
     pk.set_defaults(func=_postkatex_cmd)
+
+    pb = subp("problembank")
+    pb.add_argument("--topic", required=True,
+                    help="개념 note 가 있는 topic id (generate 로 먼저 생성)")
+    pb.add_argument("--retry", type=int, default=3,
+                    help="10/5/5 검증 실패 시 재시도 횟수")
+    pb.set_defaults(func=_problembank_cmd)
 
     # ---- chapter focus: 챕터는 사용자가 페이지 범위로 직접 지정 ----
     chap = subp("chapter")
