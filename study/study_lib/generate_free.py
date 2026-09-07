@@ -260,3 +260,57 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
                         + "\n", encoding="utf-8")
     return str(combined)
 
+
+# ---- 입력 컨텍스트 풍부화(패킹) ---------------------------------------------
+# 강 모델의 입력 컨텍스트(다만 총 ctx 32768)를 되도록 채워 출처 기반 grounding 을
+# 극대화한다. passages 는 이미 관련성 우선(primary 섹션 → crossref) 순이므로,
+# 예산 이내에서 "처음부터" 토큰을 채우며 남겨둔다.
+DEFAULT_INPUT_TOKENS = 24000          # ~24k 프로비전 + 출력/추론 예비(~8k)
+HARD_CTX = 32768
+_KEEP_OUTPUT = 8192                   # 추론+답에 남길 최소 컨텍스트
+_SCAFFOLD_EST = 1600                  # 시스템+토픽 헤더 등 passage 외 고정 오버헤드 추정
+
+
+def input_budget() -> int:
+    """passage 본문에만 쓸 입력 토큰 예산. env LOCAL_FREE_INPUT_TOKENS 로 조정.
+    상한 = HARD_CTX - _KEEP_OUTPUT - _SCAFFOLD_EST(스캐폴드 포함해도 출력 예비 보장)."""
+    import os
+    try:
+        want = int(os.environ.get("LOCAL_FREE_INPUT_TOKENS",
+                                  DEFAULT_INPUT_TOKENS))
+    except ValueError:
+        want = DEFAULT_INPUT_TOKENS
+    cap = HARD_CTX - _KEEP_OUTPUT - _SCAFFOLD_EST
+    return max(1000, min(want, cap))
+
+
+def estimate_tokens(text: str) -> int:
+    """토크나이저 없을 때의 문자 근사(한글 혼합 3자 당 ~1토큰)."""
+    return max(1, (len(text) + 2) // 3)
+
+
+def pack_passages(passages, max_tokens: int | None = None,
+                  *, count_tokens=None) -> list[str]:
+    """관련성 우선의 passages 를 입력 토큰 예산 내 최장 접두부로 자른다.
+
+    - max_tokens: 주어지면 이 값 사용, 아니면 input_budget().
+    - count_tokens: (str)->int; 없으면 estimate_tokens 근사.
+    """
+    if max_tokens is None:
+        max_tokens = input_budget()
+    if count_tokens is None:
+        count_tokens = estimate_tokens
+    # 긴 passage 하나가 예산을 넘는 최악을 위해 시스템/유저 고정 오버헤드는
+    # 여기서 여유로 보지 않고 estimate 의 안전폭으로 다룬다.
+    used = 0
+    packed: list[str] = []
+    for p in passages:
+        n = count_tokens(p)
+        if used + n > max_tokens:
+            if not packed:          # 첫 passage 조차 넘침 → 강제 1개 포함
+                packed.append(p)
+            break
+        packed.append(p)
+        used += n
+    return packed
+

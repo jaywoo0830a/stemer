@@ -90,3 +90,20 @@ def test_run_free_parts_partial_reuses_existing_parts(tmp_path):
     combo = (tmp_path / "미적분-11-3.md").read_text(encoding="utf-8")
     assert "E2_NEW" in combo          # 새 예제 반영
     assert "C1" in combo and "P1" in combo   # 기존 개념/연습 보존
+
+
+def test_pack_passages_respects_budget_keeps_prefix_order():
+    from study_lib.generate_free import pack_passages
+    # 각 passage 를 char 기반 토큰추정: 30글자 → ~10토큰
+    ps = ["x" * 30] * 10   # 10개, 각 ~10토큰
+    packed = pack_passages(ps, max_tokens=45, count_tokens=None)
+    # 45/10 ≈ 4개까지만, prefix 유지
+    assert len(packed) == 4
+    assert packed == ps[:4]
+
+
+def test_input_budget_caps_below_ctx_output_reserve():
+    import study_lib.generate_free as g
+    b = g.input_budget()
+    assert b <= g.HARD_CTX - g._KEEP_OUTPUT - g._SCAFFOLD_EST
+    assert b >= 1000

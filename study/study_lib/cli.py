@@ -454,7 +454,8 @@ def _generate_free(ws: Workspace, args) -> int:
     개별 `<topic>.<part>.md` + 병합 `<topic>.md` 를 쓴다. 그래서 16000 토큰 한도에
     한 번에 다 담다 잘리지 않는다.
     """
-    from .generate_free import PART_ORDER, run_free_parts
+    from .generate_free import PART_ORDER, input_budget, pack_passages, \
+        run_free_parts
     from .llm_local import LocalClient
     parts = list(args.part) if getattr(args, "part", None) else list(PART_ORDER)
     lib = ws.library()
@@ -474,23 +475,29 @@ def _generate_free(ws: Workspace, args) -> int:
     store.load_all()
     embedder = _resolve_embedder(args.embedder)
     llm = LocalClient()          # 로컬 llama-server (LOCAL_LLM_BASE)
+    in_budget = input_budget()
     print(f"[generate-free] model-base={llm.base_url} topics={len(topics)} "
-          f"parts={parts} (부분 분할·직접 markdown)")
+          f"parts={parts} input≤{in_budget}t (부분 분할·직접 markdown, English)")
     done = failed = 0
     for topic in topics:
-        ctx = retrieve(topic, store=store, embedder=embedder)
-        passages = ctx.texts()
-        if not passages:
+        # 넉넉한 후보 풀(primary 섹션 + 상위 crossref) → 관련성 우선 목록
+        ctx = retrieve(topic, store=store, embedder=embedder,
+                       n_candidates=400, n_crossref=200)
+        all_texts = ctx.texts()
+        if not all_texts:
             print(f"skip  {topic.topic_id}: store 에 grounded passage 없음 "
                   f"(index/accumulate 선행 필요)", file=sys.stderr)
             failed += 1
             continue
+        passages = pack_passages(all_texts, in_budget,
+                                 count_tokens=llm.count_tokens)
         try:
             note = run_free_parts(topic, llm, passages, ws.notes, parts=parts)
             lib.set_status(topic.topic_id, DRAFT, note_path=note)
             lib.save()
             done += 1
-            print(f"draft {topic.topic_id} -> {note} (+각 part 파일)")
+            print(f"draft {topic.topic_id} -> {note} "
+                  f"(passages={len(all_texts)}→used={len(passages)})")
         except Exception as exc:  # noqa: BLE001
             failed += 1
             print(f"failed {topic.topic_id}: {exc}", file=sys.stderr)

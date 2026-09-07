@@ -88,6 +88,29 @@ class LocalClient:
         except Exception as exc:  # noqa: BLE001
             raise LLMError(f"local llm bad response: {exc}") from None
 
+    def count_tokens(self, text: str) -> int:
+        """llama.cpp 서버의 `/tokenize` 로 정확한 토큰 수를 센다(추정이 아닌 실측).
+
+        실패(구버전/장애)하면 문자 기반 근사로 폴백한다. 단일 프롬프트의 passage
+        패킹(입력 ↓32768) 예산 계산에 쓰인다.
+        """
+        if not text:
+            return 0
+        import httpx  # 선택 의존성
+        try:
+            with httpx.Client(timeout=30.0) as c:
+                r = c.post(f"{self.base_url}/tokenize",
+                           json={"content": text})
+            if r.status_code == 200:
+                data = r.json()
+                toks = data.get("tokens")
+                if isinstance(toks, list):
+                    return len(toks)
+        except Exception:  # noqa: BLE001 — 폴백
+            pass
+        # 폴백 근사: 한글/혼합은 문당 대략 1~2토큰, 한글 3글자당 ~1토큰 가정.
+        return max(1, (len(text) + 2) // 3)
+
     def complete(self, *, system: str, user: str, max_tokens: int = 1000,
                  json_object: bool = True) -> LLMResult:
         # reasoning 모델은 생각(reasoning)이 max 를 삼켜 content 가 빈 채
