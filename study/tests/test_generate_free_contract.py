@@ -105,6 +105,16 @@ def test_run_free_parts_rejects_reasoning_leak_without_heading(tmp_path):
     assert not (tmp_path / "미적분-11-3.md").exists()
 
 
+def test_normalize_math_delims_converts_to_katex_dollars():
+    from study_lib.generate_free import normalize_math_delims
+    out = normalize_math_delims(
+        r"Inline \(a + b\) and display \[\sum_{n=1}^{\infty} a_n\] end.")
+    assert "Inline $a + b$" in out
+    assert r"$$\sum_{n=1}^{\infty} a_n$$" in out
+    # 이미 $ 로 쓴 것은 그대로 유지
+    assert "already $x^2$" == normalize_math_delims("already $x^2$")
+
+
 def test_pack_passages_respects_budget_keeps_prefix_order():
     from study_lib.generate_free import pack_passages
     # 각 passage 를 char 기반 토큰추정: 30글자 → ~10토큰

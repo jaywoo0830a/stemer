@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .llm import LLMError
@@ -79,6 +80,7 @@ def run_free_one(topic, llm, passages, notes_dir: str | Path) -> str:
     except Exception as exc:  # noqa: BLE001
         raise exc
     body = res.content if isinstance(res.content, str) else str(res.content)
+    body = normalize_math_delims((body or "").strip())
     front = _FRONT.format(title=topic.title or topic.topic_id, subject=topic.subject,
                           book=topic.book_id, section=topic.section or "-")
     p = Path(notes_dir) / f"{topic.topic_id}.md"
@@ -115,9 +117,13 @@ _STD = (
     "the Integral Test).\n"
     "Language: prose should flow like a good lecturer -- never a bullet dump -- yet every "
     "logical step must be explicit.\n"
-    "Math: write ALL mathematics in LaTeX inside $...$ (inline) or $$...$$ (display). Do "
-    "not leave a bare symbol outside dollars. Use \\sum, \\int, \\frac, \\lim, \\sqrt "
-    "properly; no plain-text math.\n"
+    "Math: use ONLY KaTeX delimiters -- $...$ for inline math and $$...$$ for display "
+    "math. Never use \\(...\\), \\[...\\], or dollar-less \\begin{align}/\\begin{equation} "
+    "layout; a bare math symbol outside dollars is an error. Use \\sum, \\int, \\frac, "
+    "\\lim, \\sqrt properly.\n"
+    "Completion: every sentence must end with a period, every worked item finishes with "
+    "its **Answer.**, and you must COMPLETE the entire part -- do not stop mid-sentence or "
+    "mid-derivation. A partial, stopped answer is a failure.\n"
     "Notation must be introduced before use and reused consistently. State the result at "
     "the end of each worked item in a boxed/emphasised form (e.g. '**Answer.** $S=...$').\n"
     "Ground in the given passages: quote or paraphrase, and cite inline the way the "
@@ -224,6 +230,24 @@ def _read_part_file(base: Path, topic_id: str, part: str) -> str | None:
     return txt.split("---\n\n", 2)[-1].rstrip()  # front matter 뒤 본문
 
 
+def normalize_math_delims(text: str) -> str:
+    """모델이 \\(...\\)/\\[...\\] 로 낸 수식을 KaTeX $...$/$$...$$ 로 통일한다.
+
+    reasoning 모델(R1)은 달러($)보다 backslash-parenthesis( \\( , \\) ) 형식을 선호해
+    KaTeX 렌더 호환을 깨는 경우가 많다(실측 Output). 페어 기반 단순 치환만 하므로
+    이미 $ 인 부분은 건드리지 않는다.
+    """
+    if not text:
+        return text
+    # display 먼저: \[ ... \] → $$ ... $$
+    text = re.sub(r"\\\[\s*(.*?)\s*\\\]", lambda m: "$$" + m.group(1) + "$$",
+                  text, flags=re.S)
+    # inline: \( ... \) → $ ... $
+    text = re.sub(r"\\\(\s*(.*?)\s*\\\)", lambda m: "$" + m.group(1) + "$",
+                  text, flags=re.S)
+    return text
+
+
 def run_free_parts(topic, llm, passages, notes_dir: str | Path,
                    parts=PART_ORDER, *, return_combined: bool = True) -> str:
     """topic 에 대해 일부(기본 전체) 부분을 생성·저장하고 병합본을 쓴다.
@@ -261,7 +285,7 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
                   file=sys.stderr, flush=True)
             continue
         body = res.content if isinstance(res.content, str) else str(res.content)
-        body = (body or "").strip()
+        body = normalize_math_delims((body or "").strip())
         # 품질 가드: 우리 part 는 항상 마크다운 섹션 헤딩("## ...")을 요구한다.
         # 헤딩이 없으면 = R1 이 생각(think)을 content 로 그대로 뱉은 강의식 난독산문일
         # 가능성이 크므로 저장하지 않고 실패 처리(다음 재시도/재실행에서 다시).
