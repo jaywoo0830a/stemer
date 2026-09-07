@@ -27,110 +27,53 @@ _FRONT = (
     "---\n\n"
 )
 
-import os
-
-# 언어에 따른 프롬프트 조각. LOCAL_FREE_LANG=ko 이면 한글로, 기본은 영어.
-_LANG = {
-    "en": {
-        "system": (
-            "You are an expert math tutor writing a self-contained study note for ONE topic.\n"
-            "The note must actually TEACH: a reader should be able to redo every step.\n\n"
-            "STRUCTURE (in this order):\n"
-            "1. ## Reading the Topic -- a flowing, readable explanation: what the idea is for, "
-            "   the intuition, definitions, why each key formula holds, and the one common mistake "
-            "   students make. Ground it in the textbook passages.\n"
-            "2. ## Worked examples -- provide AT LEAST 3, preferably 4-5, of increasing difficulty:\n"
-            "   one basic/template case, one typical exam-style case, and one application/word "
-            "   problem (create a plausible extension if the passage has no word problem). "
-            "   For EACH example include the FULL step-by-step solution headed **Solution.**: "
-            "   explain each algebraic/calculus move line by line (what rule is applied and why), "
-            "   not just the final answer. State the conclusion explicitly.\n"
-            "3. ## Practice problems -- provide AT LEAST 5, ordered by rising difficulty, then "
-            "   right below each give a fully worked **Solution**: (steps + final answer, as a "
-            "   built-in answer key). Do not leave problems unresolved.\n\n"
-            "QUALITY RULES:\n"
-            "- Be mathematically correct. Never state a false step; if a step relies on a theorem, "
-            "   say so (e.g. 'f is continuous/positive/decreasing on [1,oo), so Integral Test applies').\n"
-            "- Cite the textbook source inline like (textbook EXAMPLE 3) or (11.3 Exercises #7); "
-            "   create a labelled extension only when the passage lacks the needed item.\n"
-            "- Markdown only. Wrap every math expression in $...$ (display: $$...$$). One short "
-            "   symbol inline, never leave bare math outside $."
-        ),
-        "user": (
-            "TOPIC: {topic}\n"
-            "BOOK: {book}   SECTION: {section}   SUBJECT: {subject}\n\n"
-            "Textbook source passage (consult as needed):\n"
-            "{passages}\n\n"
-            "Write this topic's study note in English now (markdown body only, no YAML header). "
-            "Keep the Reading concise but make the WORKED EXAMPLES (>=3) and PRACTICE with full "
-            "solutions (>=5) the strongest part. Do not truncate -- finish every solution."
-        ),
-        "cite": "textbook EXAMPLE 3",
-    },
-    "ko": {
-        "system": (
-            "You are an expert math tutor writing a self-contained study note for ONE topic.\n"
-            "The note must actually TEACH: a reader should be able to redo every step.\n\n"
-            "STRUCTURE (in this order):\n"
-            "1. ## Reading the Topic -- a flowing, readable explanation: what the idea is for, "
-            "   the intuition, definitions, why each key formula holds, and the one common mistake "
-            "   students make. Ground it in the textbook passages.\n"
-            "2. ## Worked examples -- provide AT LEAST 3, preferably 4-5, of increasing difficulty:\n"
-            "   one basic/template case, one typical exam-style case, and one application/word "
-            "   problem (create a plausible extension if the passage has no word problem). "
-            "   For EACH example include the FULL step-by-step solution headed **Solution.**: "
-            "   explain each algebraic/calculus move line by line (what rule is applied and why), "
-            "   not just the final answer. State the conclusion explicitly.\n"
-            "3. ## Practice problems -- provide AT LEAST 5, ordered by rising difficulty, then "
-            "   right below each give a fully worked **Solution**: (steps + final answer, as a "
-            "   built-in answer key). Do not leave problems unresolved.\n\n"
-            "QUALITY RULES:\n"
-            "- Be mathematically correct. Never state a false step; if a step relies on a theorem, "
-            "   say so (e.g. 'f is continuous/positive/decreasing on [1,oo), so Integral Test applies').\n"
-            "- Cite the textbook source inline like (textbook EXAMPLE 3) or (11.3 Exercises #7); "
-            "   create a labelled extension only when the passage lacks the needed item.\n"
-            "- Markdown only. Wrap every math expression in $...$ (display: $$...$$). One short "
-            "   symbol inline, never leave bare math outside $."
-        ),
-        "user": (
-            "TOPIC: {topic}\n"
-            "BOOK: {book}   SECTION: {section}   SUBJECT: {subject}\n\n"
-            "Textbook source passage (consult as needed):\n"
-            "{passages}\n\n"
-            "Write this topic's study note, presenting the body text in Korean. "
-            "Keep Reading concise but make WORKED EXAMPLES (>=3) and PRACTICE with full "
-            "solutions (>=5) the strongest part. Do not truncate -- finish every solution."
-        ),
-        "cite": "textbook EXAMPLE 3",
-    },
-}
+# ---- 단일 파일 전체 교재 시스템 (run_free_one 용: 3개 부분을 한 호출에) ----
+_FULL_SYSTEM = (
+    "You are an expert math tutor writing a self-contained study note for ONE topic.\n"
+    "The note must actually TEACH: a reader should be able to redo every step.\n\n"
+    "STRUCTURE (in this order):\n"
+    "1. ## Reading the Topic -- a flowing, readable explanation: what the idea is for, "
+    "   the intuition, definitions, why each key formula holds, and the one common mistake "
+    "   students make. Ground it in the textbook passages.\n"
+    "2. ## Worked examples -- provide AT LEAST 3, preferably 4-5, of increasing difficulty:\n"
+    "   one basic/template case, one typical exam-style case, and one application/word "
+    "   problem (create a plausible extension if the passage has no word problem). "
+    "   For EACH example include the FULL step-by-step solution headed **Solution.**: "
+    "   explain each algebraic/calculus move line by line (what rule is applied and why), "
+    "   not just the final answer. State the conclusion explicitly.\n"
+    "3. ## Practice problems -- provide AT LEAST 5, ordered by rising difficulty, then "
+    "   right below each give a fully worked **Solution**: (steps + final answer, as a "
+    "   built-in answer key). Do not leave problems unresolved.\n\n"
+    "QUALITY RULES:\n"
+    "- Be mathematically correct. Never state a false step; if a step relies on a theorem, "
+    "   say so (e.g. 'f is continuous/positive/decreasing on [1,oo), so Integral Test applies').\n"
+    "- Cite the textbook source inline like (textbook EXAMPLE 3) or (11.3 Exercises #7); "
+    "   create a labelled extension only when the passage lacks the needed item.\n"
+    "- Markdown only. Wrap every math expression in $...$ (display: $$...$$). One short "
+    "   symbol inline, never leave bare math outside $."
+)
 
 
-def _free_lang() -> str:
-    lang = os.environ.get("LOCAL_FREE_LANG", "en").strip().lower()
-    return lang if lang in _LANG else "en"
-
-
-def _prompts() -> dict:
-    return _LANG[_free_lang()]
-
-
-def system_prompt() -> str:
-    return _prompts()["system"]
-
-
-def build_user(topic, passages) -> str:
+def _full_user(topic, passages) -> str:
     src = "\n\n".join(f"[{i}] {p}" for i, p in enumerate(passages, 1))
-    return _prompts()["user"].format(
+    return (
+        "TOPIC: {topic}\n"
+        "BOOK: {book}   SECTION: {section}   SUBJECT: {subject}\n\n"
+        "Textbook source passage (consult as needed):\n"
+        "{passages}\n\n"
+        "Write this topic's complete study note in English now (markdown body only, no YAML "
+        "header): Reading the Topic, WORKED EXAMPLES (>=3) and PRACTICE with full solutions "
+        "(>=5). Do not truncate -- finish every solution."
+    ).format(
         topic=topic.title or topic.topic_id,
         book=topic.book_id, section=topic.section or "-",
         subject=topic.subject, passages=src)
 
 
 def run_free_one(topic, llm, passages, notes_dir: str | Path) -> str:
-    """topic 의 자유 md 학습자료를 notes_dir/<topic>.md 로 저장, 경로 반환."""
+    """topic 의 자유 md 학습자료를 notes_dir/<topic>.md 로 저장, 경로 반환(영어)."""
     try:
-        res = llm.complete(system=system_prompt(), user=build_user(topic, passages),
+        res = llm.complete(system=_FULL_SYSTEM, user=_full_user(topic, passages),
                            max_tokens=16000, json_object=False)
     except Exception as exc:  # noqa: BLE001
         raise exc
@@ -161,9 +104,8 @@ _HEADER = (
 PART_ORDER = ("concept", "examples", "practice")
 
 # ---- 공통 최상 품질 표준(DeepSeek-R1-Distill-Qwen-32B 등 강 추론 모델용) ----
-# 아래 _STD 는 모든 부분 앞에 붙는 원칙이다. 본문 언어는 _LANGUAGE_KICK 으로 정한다
-# (지시 자체는 영어로 써도 강 모델은 잘 따른다). 목표: 기술적으로 틀림 없고, 왜 그
-# 단계인지 설명하며, 예제·문제가 '진짜 훈련'이 되는 약 14k 토큰급 교재.
+# 아래 _STD 는 모든 부분 앞에 붙는 공통 원칙이다. 출력 언어는 항상 영어(_EN_KICK)다.
+# 목표: 기술적으로 틀림 없고 왜 그 단계인지 설명하며, 예제·문제가 '진짜 훈련'이 되는 교재.
 _STD = (
     "You are a rigorous university math tutor writing material that a motivated student "
     "can study WITHOUT the textbook open. Every claim must be checkable from your words "
@@ -239,26 +181,18 @@ _PARTS = {
     ),
 }
 
-# 유저 프롬프트 언어 지시: 본문 해설 언어만 결정 (en/ko).
-_LANGUAGE_KICK = {
-    "en": (
-        "Present all prose, explanations, and solutions in English. Output exactly the "
-        "requested part as clean markdown body only (no YAML header). Do not truncate -- "
-        "finish every example and every solution completely before stopping."
-    ),
-    "ko": (
-        "Present all prose, explanations, and solutions in Korean (mathematical symbols and "
-        "LaTeX stay as-is). Output exactly the requested part as clean markdown body only "
-        "(no YAML header). Do not truncate -- finish every example and every solution "
-        "completely before stopping."
-    ),
-}
+# English-only: 본문 해설/풀이는 항상 영어.
+_EN_KICK = (
+    "Present all prose, explanations, and solutions in English. Output exactly the "
+    "requested part as clean markdown body only (no YAML header). Do not truncate -- "
+    "finish every example and every solution completely before stopping."
+)
 
-# 각 부분의 최대 생성 토큰. 세 부분 합계 ≈ 3000+5500+6500 ≈ 15k 토큰(강 모델·정성용).
+# 각 부분의 최대 생성 토큰. 세 부분 합계 ≈ 4k+7k+8k 토큰(강 모델·정성용).
 _PART_MAX = {"concept": 4000, "examples": 7000, "practice": 8000}
 
 
-def _part_user(topic, passages, lang: str, part: str) -> str:
+def _part_user(topic, passages, part: str) -> str:
     src = "\n\n".join(f"[{i}] {p}" for i, p in enumerate(passages, 1))
     return (
         "TOPIC: {topic}\n"
@@ -269,7 +203,7 @@ def _part_user(topic, passages, lang: str, part: str) -> str:
     ).format(
         topic=topic.title or topic.topic_id,
         book=topic.book_id, section=topic.section or "-",
-        subject=topic.subject, passages=src, kick=_LANGUAGE_KICK[lang])
+        subject=topic.subject, passages=src, kick=_EN_KICK)
 
 
 def _part_system(part: str) -> str:
@@ -294,7 +228,6 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
     재사용해 병합에 포함한다(있을 때만). 단일 슬롯 llama-server 를 순차 사용.
     병합본 notes/<topic>.md 경로를 반환한다.
     """
-    lang = _free_lang()
     topic_vars = dict(title=topic.title or topic.topic_id, subject=topic.subject,
                       book=topic.book_id, section=topic.section or "-")
     base = Path(notes_dir)
@@ -304,7 +237,7 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
     # 새로 생성할 부분
     for part in parts:
         sysp = _part_system(part)
-        usrp = _part_user(topic, passages, lang, part)
+        usrp = _part_user(topic, passages, part)
         res = llm.complete(system=sysp, user=usrp,
                            max_tokens=_PART_MAX.get(part, 8000),
                            json_object=False)
