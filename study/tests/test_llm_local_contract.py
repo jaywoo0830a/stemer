@@ -60,6 +60,21 @@ def test_local_client_uses_env_base_url(monkeypatch):
     assert c.model == "lfm2.5:1.2b-instruct"
 
 
+def test_complete_retries_when_reasoning_eats_budget(monkeypatch):
+    c = LocalClient()
+    calls = []
+
+    def fake_chat(system, user, mt):
+        calls.append(mt)
+        return '{"ok":1}' if len(calls) >= 2 else ""
+
+    monkeypatch.setattr(c, "_chat", fake_chat)
+    res = c.complete(system="s", user="u", json_object=True, max_tokens=1000)
+    assert res.content == {"ok": 1}
+    assert calls[0] == 1000
+    assert calls[1] >= 2000  # reasoning 삼킴 → 재시도는 더 큰 예산
+
+
 def test_pick_generate_llm_local_vs_remote(monkeypatch):
     from study_lib.llm_local import pick_generate_llm
     monkeypatch.setenv("LOCAL_LLM", "1")

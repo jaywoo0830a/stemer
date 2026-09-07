@@ -72,12 +72,23 @@ class LocalClient:
 
     def complete(self, *, system: str, user: str, max_tokens: int = 1000,
                  json_object: bool = True) -> LLMResult:
-        raw = self._chat(system, user, max_tokens)
-        if json_object:
-            payload = _parse_json(raw)
-        else:
-            payload = (raw or "").strip()  # 지금 생성엔 json_object 만 사용
-        return LLMResult(content=payload, usage=Usage())
+        # reasoning 모델은 생각(reasoning)이 max 를 삼켜 content 가 빈 채
+        # finish(len)될 수 있다 → 1회 비었으면 max 를 배로 늘려 재시도(최대 3회).
+        mt = max_tokens
+        raw = ""
+        for _ in range(3):
+            raw = (self._chat(system, user, mt) or "").strip()
+            if raw:
+                if json_object:
+                    return LLMResult(content=_parse_json(raw), usage=Usage())
+                return LLMResult(content=raw, usage=Usage())
+            mt = max(mt * 2, mt + 4000)   # reasoning 만 다 쓴 것 → 예산 확대
+        raise LLMError("local model returned empty content (0/3)" + _tail(raw))
+
+
+def _tail(raw: str, n: int = 120) -> str:
+    r = (raw or "").strip()
+    return ("..." + r[-n:]) if len(r) > n else r
 
 
 def _find_json_object(text: str):
