@@ -24,7 +24,7 @@ from .chunk import chunk_markdown
 from .discover import discover_topics
 from .embed import StubEmbedder, TransformerEmbedder
 from .factory import generate_one
-from .ingest import ingest_dir
+from .ingest import ingest_dir, ingest_one
 from .llm import FlashClient, LLMError
 from .parse import parse_source, parser_names
 from .profiles import load_profile, profile_names
@@ -247,6 +247,70 @@ def _ingest(ws: Workspace, args) -> int:
     return 1 if report.failed else 0
 
 
+# ---- chapter focus (챕터 단위 소규모 재인제스트) ----
+# 챕터는 사용자가 직접 페이지 범위(--range)로 지정한다.
+# EXAMPLES:  python -m study_lib.cli chapter focus --book calc --range 42-90
+def _chapter_source(args, ws) -> Path:
+    """책 source 의 로컬 PDF 경로 결정: --source 명시 → 책 메타 source."""
+    if getattr(args, "source", None):
+        return Path(args.source)
+    book = ws.library().book(args.book)
+    if not book.source:
+        raise ValueError(f"book {args.book} has no source; pass --source PATH")
+    return Path(book.source)
+
+
+def _chapter_focus(ws: Workspace, args) -> int:
+    """사용자가 고른 챕터 페이지 범위만 재인제스트 (기본 docling+FORMULAS env).
+
+    흐름:
+      1) book.page_range = args.range   (그 챕터 구간만 파싱)
+      2) 기존 store 청크 삭제 → 재인제스트 (FORMULAS 여부는 컨테이너 env 로)
+      3) 파서 기본 docling (책별 books set-parser 우선)
+    """
+    lib = ws.library()
+    book = lib.book(args.book)
+    src = _chapter_source(args, ws)
+    lib.set_book_page_range(args.book, args.range_)
+    lib.save()
+
+    store = ws.open_store()
+    store.load_all()
+    store.delete_book(args.book)   # 무해(청크 없으면 no-op), ingest_one 이 재기록
+
+    parser = book.parser or "docling"
+    embedder = _resolve_embedder(args.embedder)
+    print(f"[chapter] focusing {args.book} pages={args.range_} "
+          f"parser={parser} embedder={type(embedder).__name__} "
+          f"(FORMULAS={os.environ.get('DOCLING_FORMULAS', '0')})",
+          flush=True)
+
+    def report_line(report) -> None:
+        if report.ok:
+            print(f"ingested {args.book}: {report.chunks} chunks "
+                  f"(parser={report.parser}, pages={report.pages})", flush=True)
+        else:
+            print(f"failed   {args.book}: {report.error}", file=sys.stderr, flush=True)
+
+    res = ingest_one(
+        src, library=lib, store=store, embedder=embedder, profile=parser,
+        book_id=args.book,
+        chunk_profile=load_profile(args.chunk_profile) if args.chunk_profile else None,
+        log=lambda msg: print(msg, flush=True),
+        figures_registry=None,
+    )
+    report_line(res)
+    if not res.ok:
+        print(f"note: page_range 를 {args.range_} 로 남겨둡니다 — 필요시 "
+              f"'books set-page-range --book {args.book} --range <원래>' 로 되돌리세요",
+              file=sys.stderr)
+    else:
+        print(f"[chapter] page_range set to {args.range_}. "
+              f"같은 책 다음 챕터는 범위만 바꿔 다시 focus 하면 됩니다.",
+              flush=True)
+    return 1 if not res.ok else 0
+
+
 # ---- generate ----
 def default_guide_path(subject: str) -> Path:
     """과목 가이드(B) 기본 위치: <repo>/guides/<subject>.md (cwd 무관)."""
@@ -384,6 +448,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     st = subp("status")
     st.set_defaults(func=_status)
+
+    # ---- chapter focus: 챕터는 사용자가 페이지 범위로 직접 지정 ----
+    chap = subp("chapter")
+    cs = chap.add_subparsers(dest="action", required=True)
+    chf = cs.add_parser("focus", parents=[common])
+    chf.add_argument("--book", required=True)
+    chf.add_argument("--range", dest="range_", required=True,
+                     help="챕터 페이지 범위 '42-90' (1-based, 직접 입력)")
+    chf.add_argument("--source", help="PDF 경로(명시 안 하면 책 메타 source)")
+    chf.add_argument("--chunk-profile", choices=list(profile_names()))
+    chf.set_defaults(func=_chapter_focus)
 
     ix = subp("index")
     ix.add_argument("path")

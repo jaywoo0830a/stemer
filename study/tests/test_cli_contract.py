@@ -81,3 +81,37 @@ def test_generate_without_api_key_gives_actionable_error(tmp_path, capsys, monke
                                     "--notes", str(tmp_path / "notes")])
     assert code != 0
     assert "DEEPSEEK_API_KEY" in err
+
+
+def test_chapter_focus_reindexes_given_range(tmp_path, capsys):
+    """사용자가 직접 준 챕터 페이지 범위로만 재인제스트 (책 parser 우선)."""
+    reg = tmp_path / "registry.json"
+    store_dir = tmp_path / "store"
+    src = tmp_path / "chap.md"
+    src.write_text("# 1.1 Functions\n\nf(x)=x^2\n\n# 1.2 Limits\n\nlimit text\n",
+                   encoding="utf-8")
+    # 책: parser=text(실행 가벼움), source 는 무시하되 메타만 존재
+    main(["books", "add", "--id", "calc", "--title", "Calculus", "--subject", "math",
+          "--parser", "text", "--registry", str(reg)])
+
+    # --range 를 사용자가 직접 전달 → 성공 + page_range 반영
+    code, out, err = _call(capsys, [
+        "chapter", "focus", "--book", "calc", "--range", "42-90",
+        "--source", str(src), "--embedder", "stub",
+        "--registry", str(reg), "--store", str(store_dir)])
+    assert code == 0, err
+    assert "focusing calc pages=42-90" in out
+    assert "ingested calc: 2 chunks" in out
+    # store jsonl 갱신 + book.page_range 반영 확인
+    assert (store_dir / "calc.jsonl").exists()
+    code, out, err = _call(capsys, ["books", "list", "--registry", str(reg)])
+    assert "pages=42-90" in out
+
+
+def test_chapter_focus_requires_known_book(tmp_path, capsys):
+    reg = tmp_path / "registry.json"
+    code, out, err = _call(capsys, [
+        "chapter", "focus", "--book", "nope", "--range", "42-90",
+        "--registry", str(reg)])
+    assert code != 0 and "unknown book" in err
+
