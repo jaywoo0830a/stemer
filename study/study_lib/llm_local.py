@@ -80,25 +80,50 @@ class LocalClient:
         return LLMResult(content=payload, usage=Usage())
 
 
+def _find_json_object(text: str):
+    """여러 {…} 후보 중 '실제로 완전한 dict'로 파싱되는 마지막 것을 반환.
+
+    R1 과 같은 reasoning 모델은 응답 앞에 생각(중괄호 포함 가능)을 섞는다.
+    첫 { … 마지막 } 만으로 자르면 가짜 조각이 잡힌다 → 깊이 균형을 맞춰 끝나는
+    각 후보를 json.loads 로 시도해, dict 인 것 중 마지막(진짜 답)을 고른다.
+    """
+    best = None
+    start = 0
+    while True:
+        i = text.find("{", start)
+        if i < 0:
+            break
+        depth = 0
+        j = i
+        while j < len(text):
+            ch = text[j]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    seg = text[i:j + 1]
+                    try:
+                        obj = json.loads(seg)
+                        if isinstance(obj, dict):
+                            best = obj  # 뒤 후보가 실제 답일 가능성 높아 덮는다
+                    except Exception:  # noqa: BLE001
+                        pass
+                    start = j + 1
+                    break
+            j += 1
+        else:
+            start = j
+    return best
+
+
 def _parse_json(raw: str) -> Any:
-    """모델 응답에서 JSON 객체 추출(```json fence 포함 허용)."""
-    text = (raw or "").strip()
-    if not text:
+    """모델 응답에서 온전한 JSON 객체(dict) 추출. 못 찾으면 LLMError."""
+    text = (raw or "")
+    if not text.strip():
         raise LLMError("local model returned empty content (no JSON)")
-    if text.startswith("```"):
-        text = re.sub(r"^```[A-Za-z]*\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-    # 모델이 앞/뒤에 텍스트를 섞으면 첫 { ... 마지막 } 구간만 취한다.
-    if not text.startswith("{"):
-        i = text.find("{")
-        j = text.rfind("}")
-        if i >= 0 and j > i:
-            text = text[i:j + 1]
-    try:
-        obj = json.loads(text)
-    except Exception as exc:  # noqa: BLE001
-        raise LLMError(f"local model JSON parse failed: {exc}") from None
-    if not isinstance(obj, dict):
+    obj = _find_json_object(text)
+    if obj is None:
         raise LLMError("local model did not return a JSON object")
     return obj
 
