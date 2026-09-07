@@ -79,11 +79,23 @@ class LocalClient:
         for _ in range(3):
             raw = (self._chat(system, user, mt) or "").strip()
             if raw:
-                if json_object:
+                if not json_object:
+                    return LLMResult(content=raw, usage=Usage())
+                try:
                     return LLMResult(content=_parse_json(raw), usage=Usage())
-                return LLMResult(content=raw, usage=Usage())
+                except LLMError:
+                    # JSON 아님 — 헤드 몇 자를 에러에 담아 진단 가능하게
+                    raise LLMError(
+                        "local model did not return a JSON object; head: "
+                        + _head(raw, 200)
+                    ) from None
             mt = max(mt * 2, mt + 4000)   # reasoning 만 다 쓴 것 → 예산 확대
         raise LLMError("local model returned empty content (0/3)" + _tail(raw))
+
+
+def _head(raw: str, n: int = 200) -> str:
+    r = (raw or "").strip()
+    return r[:n] + ("…" if len(r) > n else "")
 
 
 def _tail(raw: str, n: int = 120) -> str:
