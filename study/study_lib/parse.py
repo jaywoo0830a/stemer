@@ -200,14 +200,15 @@ def _build_docling_converter():
     성능 전략 (CPU):
     - AcceleratorOptions: 전체 코어 사용 (기본 4스레드 한계 제거)
     - heading_hierarchy: PDF 북마크/번호로 헤딩 레벨 추론 → `## 1.1 제목` 구조
-    - TableFormerMode.FAST: 테이블 속도 우선
-    - OCR/이미지/수식 기본 OFF (텍스트 레이어 PDF는 불필요) — 환경변수로 ON
+    - 수식 모드(FORMULAS)에서 codeformula VLM 선택 + float32(CPU AVX-512 에 유리)
+    - OCR/테이블/코드: 텍스트 레이어 PDF 사람용이면 OFF (필요시 ON)
     """
     from docling.datamodel.accelerator_options import (  # type: ignore
         AcceleratorDevice,
         AcceleratorOptions,
     )
     from docling.datamodel.pipeline_options import (  # type: ignore
+        CodeFormulaVlmOptions,
         PdfPipelineOptions,
         TableFormerMode,
     )
@@ -218,19 +219,37 @@ def _build_docling_converter():
     opts = PdfPipelineOptions()
     opts.accelerator_options = accel
     do_formulas = os.environ.get("DOCLING_FORMULAS", "0") == "1"
+    formula_preset = os.environ.get("DOCLING_FORMULA_PRESET", "codeformulav2")
     # 기본값: 텍스트 레이어 PDF 기준 (스캔본은 DOCLING_OCR=1)
     opts.do_ocr = os.environ.get("DOCLING_OCR", "0") == "1"
+    # 표 구조는 기본 켜짐. 수식 변환 벤치에선 DOCLING_TABLES=0 으로 끌 수 있다.
     opts.do_table_structure = os.environ.get("DOCLING_TABLES", "1") != "0"
-    # 수식 디코딩: formula-not-decoded 마커를 LaTeX(or 유니코드)로 채운다.
-    # codeformulav2 VLM 이 수식 이미지를 읽어 처리 — CPU라 매우 느리고
-    # 모델 다운로드(수 GB)가 필요하다. 항상 켜두지 말고 DOCLING_FORMULAS=1.
     opts.do_formula_enrichment = do_formulas
     opts.do_code_enrichment = False
     opts.images_scale = 1.0
-    # 수식 VLM 은 수식 crop(이미지)이 필요하다 → 페이지/그림 렌더를 켜야 한다
     opts.generate_page_images = do_formulas
     opts.generate_picture_images = do_formulas
-    # 테이블: 정확도보다 속도 (복잡 테이블은 DOCLING_TABLES_ACCURATE=1)
+    if do_formulas:
+        try:
+            # 수식 인식 프리셋: codeformulav2(전용, 정확) | granite_docling(가벼움)
+            opts.code_formula_options = CodeFormulaVlmOptions.from_preset(
+                formula_preset
+            )
+            # CPU(특히 AVX-512/zen4)에선 bfloat16 보다 float32 native 가 유리할 수 있다.
+            # dtype 이 model_spec 에 있으면 float32 로 강제 (config 로 되돌리려면 env)
+            if os.environ.get("DOCLING_FORMULA_FP32", "1") == "1":
+                spec = opts.code_formula_options.model_spec
+                if spec is not None and getattr(spec, "engine_overrides", None):
+                    # engine_overrides 의 TRANSFORMERS 를 fp32 로
+                    for eng, cfg in list(spec.engine_overrides.items()):
+                        try:
+                            if cfg.torch_dtype is not None:
+                                cfg.torch_dtype = "float32"
+                        except Exception:
+                            pass
+        except Exception:
+            pass  # 프리셋 구성이 이 버전에서 안 되면 기본값 유지
+    # 테이블이 켜졌으면 정확도 < 속도 (DOCLING_TABLES_ACCURATE=1 로 복귀)
     try:
         if os.environ.get("DOCLING_TABLES_ACCURATE", "0") != "1":
             opts.table_structure_options.mode = TableFormerMode.FAST
