@@ -288,13 +288,15 @@ def _ingest_piece(ws: Workspace, args) -> int:
 
 # ---- postkatex (로컬 Ollama 로 완성된 note 의 수식만 다양화/후처리) ----
 def _postkatex_cmd(ws: Workspace, args) -> int:
+    from .postproc_katex import refine_math_detailed
+    from pathlib import Path as _P
     lib = ws.library()
-    targets: list[Path] = []
+    targets: list[_P] = []
     if args.path:
-        targets = [Path(args.path)]
+        targets = [_P(args.path)]
     elif args.book:
-        targets = [Path(t.note_path) for t in lib.topics(book_id=args.book)
-                   if t.note_path and Path(t.note_path).exists()]
+        targets = [_P(t.note_path) for t in lib.topics(book_id=args.book)
+                   if t.note_path and _P(t.note_path).exists()]
     else:
         print("error: pass --path FILE or --book", file=sys.stderr)
         return 2
@@ -302,17 +304,20 @@ def _postkatex_cmd(ws: Workspace, args) -> int:
         print("no note files matched")
         return 0
     client = default_ollama_client()
+    verbose = bool(getattr(args, "verbose", False))
     print(f"[postkatex] model={client.model} host={client.base_url} "
           f"files={len(targets)}")
     changed = kept = 0
     for p in targets:
         before = p.read_text(encoding="utf-8")
-        out = postkatex_if_enabled(p, force=True)   # env 없어도 force
+        out, reason = refine_math_detailed(before, client, verbose=verbose)
         if out and out != before:
             changed += 1
-            print(f"reformatted {p.name}")
+            p.write_text(out, encoding="utf-8")
+            print(f"reformatted {p.name} ({reason})")
         else:
             kept += 1
+            print(f"kept      {p.name} ({reason})")
     print(f"done: changed={changed} kept={kept}")
     return 0
 
@@ -530,6 +535,8 @@ def build_parser() -> argparse.ArgumentParser:
     pk = subp("postkatex")
     pk.add_argument("--path", help="개별 note 파일 후처리")
     pk.add_argument("--book", help="책의 모든 draft note 파일 후처리")
+    pk.add_argument("--verbose", action="store_true",
+                    help="가드 거절 사유 + 후보 앞부분 출력 (진단)")
     pk.set_defaults(func=_postkatex_cmd)
 
     # ---- chapter focus: 챕터는 사용자가 페이지 범위로 직접 지정 ----

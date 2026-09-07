@@ -134,6 +134,30 @@ def refine_math(markdown: str, client: OllamaClient) -> str:
     return candidate if ok else markdown
 
 
+def refine_math_detailed(markdown: str, client: OllamaClient,
+                         *, verbose: bool = False) -> tuple[str, str]:
+    """진단용 — 후처리 후 (결과 또는 원본, reason). verbose 시 candidate 도 사유에 포함.
+
+    reason 예: 'ok' | 'llm-error: ...' | 'empty' | 'guard: <사유>'.
+    """
+    try:
+        candidate = client._call(
+            REFORMAT_USER.format(markdown=markdown), system=REFORMAT_SYSTEM
+        ).strip()
+    except Exception as exc:
+        return markdown, f"llm-error: {exc}"
+    if not candidate:
+        return markdown, "empty"
+    ok, why = guard_ok(markdown, candidate)
+    if ok:
+        return candidate, "ok"
+    if verbose:
+        # 사유 + (이상하면) 후보 미리보기 일부
+        return markdown, f"guard: {why}; candidate(first 300): {candidate[:300]}"
+    return markdown, f"guard: {why}"
+
+
+
 ###############################################################################
 # 테스트용 순수 오케스트레이션 (Ollama 프로토콜 추상) — 서버 연동 전 로컬 TDD
 ###############################################################################
