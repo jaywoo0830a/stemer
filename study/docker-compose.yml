@@ -40,9 +40,10 @@ services:
       DOCLING_TABLES: ${DOCLING_TABLES:-1}
       # 로컬 LLM(Ollama) KaTeX 후처리 — 게이트: POSTKATEX=1 로 켠다
       # network_mode: host → 컨테이너가 호스트 loopback 을 봄 (127.0.0.1 이 호스트 Ollama)
+      LOCAL_LLM: ${LOCAL_LLM:-0}             # 1 이면 개념 생성도 로컬(DeepSeek 불필요)
       POSTKATEX: ${POSTKATEX:-0}
       OLLAMA_HOST: ${OLLAMA_HOST:-http://127.0.0.1:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-lfm2.5:1.2b-instruct}
     command: ["python", "-m", "study_lib.cli", "status"]
 
 volumes:
