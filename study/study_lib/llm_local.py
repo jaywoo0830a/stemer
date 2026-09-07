@@ -47,12 +47,12 @@ class LocalClient:
     def _chat(self, system: str, user: str, max_tokens: int) -> str:
         import httpx  # 선택 의존성 (DeepSeek 경로와 동일)
 
-        def msg(role: str, text: str) -> dict:
-            # 최신 llama-server 는 content 를 배열({type:text,text})로 요구
-            return {"role": role, "content": [{"type": "text", "text": text}]}
-
+        # llama-server(8081, Qwen)는 표준 OpenAI 문자열 content 를 원한다.
         body = {
-            "messages": [msg("system", system), msg("user", user)],
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
             "temperature": 0.0,
             "max_tokens": max_tokens,
             "stream": False,
@@ -67,8 +67,7 @@ class LocalClient:
         except Exception as exc:
             raise LLMError(f"local llm failed: {exc}") from None
         try:
-            choices = r.json()["choices"]
-            raw = choices[0]["message"]
+            raw = r.json()["choices"][0]["message"]
             content = raw.get("content") or ""
             if isinstance(content, list):  # 호환: 배열로 온 경우
                 content = "".join(
