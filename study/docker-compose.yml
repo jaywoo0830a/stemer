@@ -7,13 +7,13 @@ services:
       args:
         EMBED: ${EMBED:-0}
         DOCLING: ${DOCLING:-0}
+    # 호스트 네트워크 공유 — 컨테이너가 호스트의 127.0.0.1 을 그대로 본다.
+    # (로컬 Ollama 후처리 11434 연결이 host.docker.internal 게이트웨이 경유보다 확실)
+    network_mode: host
     volumes:
       - ./books:/books          # 입력 PDF 폴더 (호스트 study/books)
       - ./data:/data            # 영속: registry.json / store/ / notes/
       - hf-cache:/root/.cache/huggingface   # HF 모델 캐시 영속(재다운로드 방지)
-    # 컨테이너 → 호스트 포트 접근 (로컬 Ollama 후처리 11434 등)
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     # /dev/shm 확대: docling 스레드 파이프라인/DataLoader 공유메모리 (기본 64MB 는 부족)
     shm_size: '2gb'
     ulimits:
@@ -39,8 +39,9 @@ services:
       # docling 처리 시 표 구조 추출 (FORMULAS 온전성 검사 때는 0 도 가능)
       DOCLING_TABLES: ${DOCLING_TABLES:-1}
       # 로컬 LLM(Ollama) KaTeX 후처리 — 게이트: POSTKATEX=1 로 켠다
+      # network_mode: host → 컨테이너가 호스트 loopback 을 봄 (127.0.0.1 이 호스트 Ollama)
       POSTKATEX: ${POSTKATEX:-0}
-      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://127.0.0.1:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
     command: ["python", "-m", "study_lib.cli", "status"]
 
