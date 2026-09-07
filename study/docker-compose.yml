@@ -43,6 +43,8 @@ services:
       LOCAL_LLM: ${LOCAL_LLM:-0}             # 1 이면 개념 생성도 로컬(DeepSeek 불필요)
       LOCAL_LLM_FREE: ${LOCAL_LLM_FREE:-0}   # 1 이면 스키마 무시·로컬 자유 markdown 생성
       POSTKATEX: ${POSTKATEX:-0}
+      # 로컬 추론 서버(llama.cpp llama-server, OpenAI 호환) 주소 — 컨테이너로 전달
+      LOCAL_LLM_BASE: ${LOCAL_LLM_BASE:-http://127.0.0.1:8080}
       OLLAMA_HOST: ${OLLAMA_HOST:-http://127.0.0.1:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-lfm2.5:1.2b-instruct}
     command: ["python", "-m", "study_lib.cli", "status"]
