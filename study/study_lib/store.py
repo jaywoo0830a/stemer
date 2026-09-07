@@ -183,6 +183,14 @@ class IndexStore:
             self.add(c, vector=vec)
         return len(chunks)
 
+    def book_max_seq(self, book_id: str) -> int:
+        """책이 이미 가진 청크 seq 의 최댓값(없으면 -1). 증분 append 시작 seq 계산용."""
+        mx = -1
+        for c in self._mem.values():
+            if c.book_id == book_id and c.seq > mx:
+                mx = c.seq
+        return mx
+
     # ---- 영속화 ----
     def flush(self, book_id: str | None = None) -> None:
         if self._sink is None:

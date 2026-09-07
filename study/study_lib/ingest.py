@@ -221,6 +221,69 @@ def ingest_one(path: str | Path, *, library: Library, store: IndexStore,
         return IngestReport(book_id=bid, ok=False, error=str(exc))
 
 
+def ingest_piece(path: str | Path, *, library: Library, store: IndexStore,
+                 embedder, book_id: str, pages: str,
+                 chunk_profile: ChunkProfile | None = None,
+                 figures_registry=None,
+                 log: Callable[[str], None] | None = None) -> IngestReport:
+    """증분 인제스트 — 이미 들은 책에 page 조각(pages 'A-B') 을 추가 누적.
+
+    기존(전체) 인제스트와 달리 store 를 지우지 않는다:
+      1) 아니 아직 안 넣은 페이지만 골라냄(library.pending_pages)
+      2) 각 미커버 구간을 docling page_range 로 파싱해
+         **기존 book 청크 seq 뒤부터** 이어 붙여 store 에 append
+      3) 성공한 구간을 book.intervals 에 병합 → 나중 조각들과 함께 책 전체가 누적
+    같은 페이지 재호출은 멱등(skip). 부분 중복이면 새 페이지만 파싱.
+    """
+    bid = book_id
+    parsed_book = library.book(bid)          # 미등록 → KeyError
+    pending = library.pending_pages(bid, pages)
+    if not pending:
+        if log:
+            log(f"[{bid}] pages {pages} already covered -> skip")
+        return IngestReport(book_id=bid, ok=True, chunks=0, parser="",
+                            pages=len(pending))
+    store.load_all()                          # 기존 청크를 반드시 RAM 에 (append 용)
+    parser = parsed_book.parser or "docling"
+    seq = store.book_max_seq(bid) + 1         # 기존 청크 뒤부터 (id 충돌 없음)
+
+    all_chunks = []
+    all_vectors = []
+    seen_pages = 0
+    try:
+        for span in pending:
+            rng = f"{span[0]}-{span[1]}"
+            parsed = parse_source(path, profile=parser, book_id=bid, page_range=rng)
+            _guard_quality(parsed)
+            chunks = chunk_markdown(parsed.markdown, book_id=bid,
+                                    profile=chunk_profile, start_seq=seq)
+            seq += len(chunks)
+            if not chunks:
+                raise ValueError(f"no chunks extracted for pages {rng}")
+            if log:
+                log(f"[{bid}] parse pages={rng} chunks={len(chunks)}")
+            vectors = _embed_with_progress(embedder, [c.text for c in chunks], bid, log)
+            all_chunks.extend(chunks)
+            all_vectors.extend(vectors)
+            seen_pages += span[1] - span[0] + 1
+        store.add_many(all_chunks, vectors=all_vectors)
+        store.flush(bid)                      # 책 전체(기존 + 신규)를 한 파일로
+        library.mark_pages_ingested(bid, pending)
+        # 그림/표 레지스트리: 문단 하위 추가는 생략(있으면 확장)
+        library.set_book_status(bid, INDEXED)
+        library.save()
+        if log:
+            log(f"[{bid}] commit done (+{len(all_chunks)} chunks => "
+                f"total {store.book_max_seq(bid)+1})")
+        return IngestReport(book_id=bid, ok=True, chunks=len(all_chunks),
+                            parser=parsed_book.parser or "docling",
+                            pages=seen_pages)
+    except Exception as exc:
+        library.set_book_error(bid, str(exc))
+        library.save()
+        return IngestReport(book_id=bid, ok=False, error=str(exc))
+
+
 def _plan(directory: Path) -> list[Path]:
     return sorted(
         p for p in directory.iterdir()

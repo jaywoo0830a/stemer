@@ -24,7 +24,7 @@ from .chunk import chunk_markdown
 from .discover import discover_topics
 from .embed import StubEmbedder, TransformerEmbedder
 from .factory import generate_one
-from .ingest import ingest_dir, ingest_one
+from .ingest import ingest_dir, ingest_one, ingest_piece
 from .llm import FlashClient, LLMError
 from .parse import parse_source, parser_names
 from .profiles import load_profile, profile_names
@@ -247,6 +247,44 @@ def _ingest(ws: Workspace, args) -> int:
     return 1 if report.failed else 0
 
 
+def _ingest_piece(ws: Workspace, args) -> int:
+    """이미 있는 책에 page 조각을 추가 누적(멱등) — store 를 지우지 않는다.
+
+    이미 그 페이지가 들어 있으면 skip, 부분 중복이면 새 페이지만 docling 으로.
+    accumulate 이라 이 책에 쌓인 여러 조각이 store 에 함께 남는다.
+    수식 LaTeX 는 컨테이너 env(DOCLING_FORMULAS=1 등) 로 켠다.
+    """
+    def src_path() -> Path:
+        if args.source:
+            return Path(args.source)
+        book = ws.library().book(args.book)
+        if not book.source:
+            raise ValueError(f"book {args.book} has no source; pass --source PATH")
+        return Path(book.source)
+
+    lib = ws.library()
+    parser = lib.book(args.book).parser or "docling"
+    chunk_profile = load_profile(args.chunk_profile) if args.chunk_profile else None
+    embedder = _resolve_embedder(args.embedder)
+    print(f"[accumulate] {args.book} pages={args.pages} parser={parser} "
+          f"embedder={type(embedder).__name__} "
+          f"(FORMULAS={os.environ.get('DOCLING_FORMULAS', '0')})", flush=True)
+    res = ingest_piece(src_path(), library=lib, store=ws.open_store(),
+                       embedder=embedder, book_id=args.book, pages=args.pages,
+                       chunk_profile=chunk_profile,
+                       log=lambda msg: print(msg, flush=True))
+    if not res.ok:
+        print(f"failed   {args.book}: {res.error}", file=sys.stderr, flush=True)
+        return 1
+    if res.chunks == 0:
+        print(f"skip     {args.book}: pages {args.pages} already covered (no new)")
+        return 0
+    print(f"ingested {args.book}: +{res.chunks} chunks over pages={res.pages} "
+          f"(parser={res.parser})")
+    print(f"now covered intervals: {lib.book(args.book).intervals}")
+    return 0
+
+
 # ---- chapter focus (챕터 단위 소규모 재인제스트) ----
 # 챕터는 사용자가 직접 페이지 범위(--range)로 지정한다.
 # EXAMPLES:  python -m study_lib.cli chapter focus --book calc --range 42-90
@@ -448,6 +486,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     st = subp("status")
     st.set_defaults(func=_status)
+
+    acc = subp("accumulate")
+    acc.add_argument("--book", required=True)
+    acc.add_argument("--pages", dest="pages", required=True,
+                     help="추가할 페이지 조각 '786-795' (1-based, 직접 입력)")
+    acc.add_argument("--source", help="PDF 경로(명시 안 하면 책 메타 source)")
+    acc.add_argument("--chunk-profile", choices=list(profile_names()))
+    acc.set_defaults(func=_ingest_piece)
 
     # ---- chapter focus: 챕터는 사용자가 페이지 범위로 직접 지정 ----
     chap = subp("chapter")

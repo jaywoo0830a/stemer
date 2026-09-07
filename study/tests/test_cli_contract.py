@@ -115,3 +115,47 @@ def test_chapter_focus_requires_known_book(tmp_path, capsys):
         "--registry", str(reg)])
     assert code != 0 and "unknown book" in err
 
+
+def test_accumulate_idempotent_and_intervals(tmp_path, capsys):
+    """accumulate 는 같은 조각을 다시 넣으면 skip(멱등)하고 intervals 를 갱신한다."""
+    reg = tmp_path / "registry.json"
+    store_dir = tmp_path / "store"
+    src = tmp_path / "chap.md"
+    src.write_text("# 1.1 Functions\n\nf(x)=x^2\n\n# 1.2 Limits\n\nlimit text\n",
+                   encoding="utf-8")
+    main(["books", "add", "--id", "calc", "--title", "Calculus", "--subject", "math",
+          "--parser", "text", "--registry", str(reg)])
+
+    # 첫 조각 인제스트
+    code, out, err = _call(capsys, [
+        "accumulate", "--book", "calc", "--pages", "42-48",
+        "--source", str(src), "--embedder", "stub",
+        "--registry", str(reg), "--store", str(store_dir)])
+    assert code == 0, err
+    assert f"now covered intervals: [[42, 48]]" in out
+
+    # 같은 조각 재호출 → skip(no new), 소유 구간 유지
+    code, out, err = _call(capsys, [
+        "accumulate", "--book", "calc", "--pages", "42-48",
+        "--source", str(src), "--embedder", "stub",
+        "--registry", str(reg), "--store", str(store_dir)])
+    assert code == 0, err
+    assert "already covered (no new)" in out
+
+    # 다른 조각(부분 중복) → 48-48 은 겹치니 49-55 만 새로
+    code, out, err = _call(capsys, [
+        "accumulate", "--book", "calc", "--pages", "48-55",
+        "--source", str(src), "--embedder", "stub",
+        "--registry", str(reg), "--store", str(store_dir)])
+    assert code == 0, err
+    # disjoint 병합 → [42,55]
+    assert "now covered intervals: [[42, 55]]" in out
+
+    # store 에 seq 충돌 없이 청크가 누적되어 jsonl 하나로 통합
+    lines = (store_dir / "calc.jsonl").read_text(encoding="utf-8").splitlines()
+    seqs = []
+    for ln in lines:
+        import json
+        seqs.append(json.loads(ln)["seq"])
+    assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)  # 순차·유일
+

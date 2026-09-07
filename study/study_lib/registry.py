@@ -53,6 +53,10 @@ class Book:
     # 페이지 범위 (1-based inclusive, "42-1249") — None 이면 전체.
     # 초입부/부록 제외하고 핵심 본문만 파싱할 때 사용 (docling page_range).
     page_range: str | None = None
+    # 증분 누적 인제스트로 이미 store 에 넣은 페이지 span 들 (1-based inclusive,
+    # disjoint·정렬, list[list[int]] 형태로 json 과 호환). 여러 조각이 한 책에
+    # 쌓여 결국 전체 교재가 되는 것을 이 구간집합으로 관리한다.
+    intervals: list = field(default_factory=list)
     status: str = PENDING
     error: str = ""
     added_at: str = field(default_factory=_now)
@@ -162,6 +166,43 @@ class Library:
         """책별 청크 프로필 지정/변경 (None 이면 기본 프로필)."""
         book = self.book(book_id)
         book.chunk_profile = profile
+        return book
+
+    # ---- 증분 누적(구간집합) 접근 ----
+    def pending_pages(self, book_id: str, request) -> list:
+        """요청 span(또는 문자열 'A-B') 중 아직 store 에 없는(인제스트 안 된) 페이지 span.
+
+        부분 중복이면 새 페이지만 남긴다 — docling 은 이 결과 스팬들만 돌리면 된다.
+        """
+        from .pages import missing_spans, _norm
+        if isinstance(request, str):
+            from .parse import parse_page_range
+            parsed = parse_page_range(request)
+            if parsed is None:
+                return []
+            request = parsed
+        held = [tuple(s) for s in self.book(book_id).intervals]
+        return [list(_norm(s)) for s in missing_spans(held, request)]
+
+    def book_covers_page(self, book_id: str, page: int) -> bool:
+        """이 책이 page 를 이미 누적 인제스트했는가."""
+        from .pages import cover
+        return cover([tuple(s) for s in self.book(book_id).intervals], page)
+
+    def mark_pages_ingested(self, book_id: str, spans: list) -> Book:
+        """이번에 실제로 docling 인제스트(추가)한 구간들을 intervals 에 병합."""
+        from .pages import add_and_merge
+        book = self.book(book_id)
+        acc = [tuple(s) for s in book.intervals]
+        for span in spans:
+            acc = add_and_merge(acc, span)
+        book.intervals = [list(s) for s in acc]   # json 호환
+        return book
+
+    def reset_intervals(self, book_id: str) -> Book:
+        """전체 재인제스트 후 구간집합 초기화(기존 page_range 전체를 소유로)."""
+        book = self.book(book_id)
+        book.intervals = []
         return book
 
     def book(self, book_id: str) -> Book:

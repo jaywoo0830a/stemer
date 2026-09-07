@@ -128,6 +128,46 @@ def test_clear_and_delete_topics():
     assert n == 1
     assert lib.topics(book_id="a") == []
     assert len(lib.topics(book_id="b")) == 1  # 다른 책은 유지
+
+
+def _mk_book(tmp_path):
+    lib = Library(JsonFileStore(tmp_path / "registry.json"))
+    lib.add_book("calc", "Calculus", "math", parser="docling")
+    return lib
+
+
+def test_pending_pages_then_mark_accumulates(tmp_path):
+    lib = _mk_book(tmp_path)
+    # 처음엔 아무것도 안 가짐 → 전부 새로
+    assert lib.pending_pages("calc", "786-790") == [[786, 790]]
+    # 786-790 을 실제 인제스트 완료로 마킹
+    lib.mark_pages_ingested("calc", [[786, 790]])
+    # 다음날 788-795 를 더 공부 → 788-790 은 이미 있으므로 791-795 만 필요
+    assert lib.pending_pages("calc", "788-795") == [[791, 795]]
+    lib.mark_pages_ingested("calc", [[791, 795]])
+    # 누적: disjoint 병합으로 [786, 795]
+    assert lib.book("calc").intervals == [[786, 795]]
+
+
+def test_intervals_survive_save_reload(tmp_path):
+    lib = _mk_book(tmp_path)
+    lib.mark_pages_ingested("calc", [[42, 90], [320, 340]])
+    lib.save()
+    reloaded = Library(JsonFileStore(tmp_path / "registry.json"))
+    assert reloaded.book("calc").intervals == [[42, 90], [320, 340]]
+    # disjoint 병합: 인접하면 합쳐짐
+    reloaded.mark_pages_ingested("calc", [[88, 110]])
+    reloaded.save()
+    again = Library(JsonFileStore(tmp_path / "registry.json"))
+    assert again.book("calc").intervals == [[42, 110], [320, 340]]
+
+
+def test_reset_intervals_clears(tmp_path):
+    lib = _mk_book(tmp_path)
+    lib.mark_pages_ingested("calc", [[42, 90]])
+    lib.reset_intervals("calc")
+    assert lib.book("calc").intervals == []
+    assert lib.pending_pages("calc", "42-90") == [[42, 90]]
     # 없는 책은 KeyError
     with pytest.raises(KeyError, match="unknown book"):
         lib.clear_topics("missing")
