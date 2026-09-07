@@ -5,7 +5,7 @@ LLMResult(content=dict, usage)` 계약에만 의존한다. 그러므로 아래 �
 그 계약을 로컬 Ollama 로 구현하면, 파이프라인(validate→patch→render→lint→저장)은
 손대지 않고 "진입 LLM 만 로컬" 로 교체된다(LOCAL_LLM=1).
 
-- 모델: OLLAMA_MODEL (예: qwen3-coder:30b) — host network 로 호스트 127.0.0.1.
+- 모델: OLLAMA_MODEL (기본 lfm2.5:1.2b-instruct) — host network 로 호스트 127.0.0.1.
 - thinking off, 구조화 JSON 만 강제(fence 제거 + json.loads).
 - 사용: os.environ['LOCAL_LLM']='1'
 """
@@ -20,8 +20,9 @@ from .llm import LLMError, LLMResult, Usage
 from .postproc_katex import default_ollama_client
 
 
+# 기본 로컬 생성 모델 (env OLLAMA_MODEL 이 우선; 명시 없으면 최속 LFM2.5 CPU 경량)
 def _model_default():
-    return os.environ.get("OLLAMA_MODEL", "qwen3-coder:30b")
+    return os.environ.get("OLLAMA_MODEL", "lfm2.5:1.2b-instruct")
 
 
 class LocalClient:

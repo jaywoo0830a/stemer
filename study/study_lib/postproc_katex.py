@@ -81,7 +81,7 @@ class OllamaClient:
     """Ollama /api/generate 경량 클라이언트 (표준 urllib — 추가 의존성 없음)."""
 
     def __init__(self, *, base_url: str = "http://host.docker.internal:11434",
-                 model: str = "qwen2.5:3b", timeout: float = 1200.0) -> None:
+                 model: str = "lfm2.5:1.2b-instruct", timeout: float = 1200.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
@@ -192,7 +192,7 @@ def default_ollama_client() -> OllamaClient:
     """env(OLLAMA_HOST/OLLAMA_MODEL)로 받은 기본 Ollama 클라이언트."""
     import os
     host = os.environ.get("OLLAMA_HOST", "http://host.docker.internal:11434")
-    model = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
+    model = os.environ.get("OLLAMA_MODEL", "lfm2.5:1.2b-instruct")
     return OllamaClient(base_url=host, model=model)
 
 
