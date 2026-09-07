@@ -48,6 +48,16 @@ SYSTEM_TEMPLATE = (
     "Incorrect f values:\n"
     "  f: \"y'-3y=0\"            (missing $)\n"
     "  f: \"$y'-3y=0$ and ...\"  (prose in f)\n"
+    "\n"
+    "SOURCE FIDELITY (grounding in the actual textbook example/problem passages):\n"
+    "5. The user provides numbered grounded passages `[n] text ...` harvested from "
+    "the real textbook (sections, examples, problems) for this topic.\n"
+    "6. Worked examples (`ex`) and practice problems (`pr`): base each one on a "
+    "real EXAMPLE/PROBLEM visible in a `[n]` passage — restate it concisely and "
+    "give its textbook-style solution. Do NOT invent example numbers or problems "
+    "that are unrelated to the passage.\n"
+    "7. If no usable EXAMPLE/PROBLEM passage is in context for a slot, prefer a "
+    "short self-built illustrative example clearly tied to the topic's formulas.\n"
 )
 
 
