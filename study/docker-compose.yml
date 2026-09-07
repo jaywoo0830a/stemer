@@ -29,6 +29,12 @@ services:
       # AVX-512 지원 CPU(Zen4/5, 9700X)에서 oneDNN 이 AVX-512 커널을 쓰도록.
       # 지원 안 하는 CPU에서 강제하면 크래시 → 미지원 CPU 배포 시 비워둘 것.
       ONEDNN_MAX_CPU_ISA: ${ONEDNN_MAX_CPU_ISA:-AVX512_CORE}
+      # docling 수식 디코딩(FORMULAS) — 재인제스트 때만 켠다 (기본 off)
+      DOCLING_FORMULAS: ${DOCLING_FORMULAS:-0}
+      DOCLING_FORMULA_PRESET: ${DOCLING_FORMULA_PRESET:-codeformulav2}
+      DOCLING_FORMULA_FP32: ${DOCLING_FORMULA_FP32:-1}
+      # docling 처리 시 표 구조 추출 (FORMULAS 온전성 검사 때는 0 도 가능)
+      DOCLING_TABLES: ${DOCLING_TABLES:-1}
     command: ["python", "-m", "study_lib.cli", "status"]
 
 volumes:
