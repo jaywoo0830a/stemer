@@ -30,7 +30,7 @@ from .llm_local import pick_generate_llm
 from .parse import parse_source, parser_names
 from .profiles import load_profile, profile_names
 from .protocol import load_schema
-from .registry import INDEXED, JsonFileStore, Library
+from .registry import DRAFT, INDEXED, JsonFileStore, Library
 from .store import IndexStore, JsonDurableSink
 from .subjects import SUBJECTS
 from .postproc_katex import default_ollama_client, guard_ok, postkatex_if_enabled
@@ -447,7 +447,54 @@ def _load_guide(path: str | None, subject: str) -> str:
     return guide.read_text(encoding="utf-8") if guide.exists() else ""
 
 
+def _generate_free(ws: Workspace, args) -> int:
+    """LOCAL_LLM_FREE=1 — 로컬 LLM 이 스키마 없이 `.md` 학습자료를 곧장 씀."""
+    from .generate_free import run_free_one
+    from .llm_local import LocalClient
+    lib = ws.library()
+    if args.topic:
+        topics = [lib.topic(args.topic)]
+    elif args.book:
+        lib.book(args.book)
+        topics = lib.topics(book_id=args.book, status="todo")
+    else:
+        topics = lib.pending_topics()
+    if args.limit and args.limit > 0:
+        topics = topics[:args.limit]
+    if not topics:
+        print("no pending topics")
+        return 0
+    store = ws.open_store()
+    store.load_all()
+    embedder = _resolve_embedder(args.embedder)
+    llm = LocalClient()          # 로컬 llama-server (LOCAL_LLM_BASE)
+    print(f"[generate-free] model-base={llm.base_url} topics={len(topics)} "
+          f"(스키마 무시·직접 markdown)")
+    done = failed = 0
+    for topic in topics:
+        ctx = retrieve(topic, store=store, embedder=embedder)
+        passages = ctx.texts()
+        if not passages:
+            print(f"skip  {topic.topic_id}: store 에 grounded passage 없음 "
+                  f"(index/accumulate 선행 필요)", file=sys.stderr)
+            failed += 1
+            continue
+        try:
+            note = run_free_one(topic, llm, passages, ws.notes)
+            lib.set_status(topic.topic_id, DRAFT, note_path=note)
+            lib.save()
+            done += 1
+            print(f"draft {topic.topic_id} -> {note}")
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            print(f"failed {topic.topic_id}: {exc}", file=sys.stderr)
+    print(f"done={done} failed={failed}")
+    return 1 if failed else 0
+
+
 def _generate(ws: Workspace, args) -> int:
+    if os.environ.get("LOCAL_LLM_FREE", "0") == "1":
+        return _generate_free(ws, args)
     lib = ws.library()
     if args.topic:
         topics = [lib.topic(args.topic)]          # 개별 토픽 1건 (상태 무관)
