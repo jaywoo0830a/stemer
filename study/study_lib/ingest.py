@@ -151,7 +151,7 @@ def _worker_ingest(payload: dict) -> dict:
     _cap_worker_threads(payload.get("threads") or 1)
     try:
         parsed = parse_source(payload["path"], profile=payload["profile"], book_id=bid,
-                              page_range=payload.get("page_range"))
+                              page_range=payload.get("page_range"), log=print)
         _guard_quality(parsed)
         chunks = chunk_markdown(parsed.markdown, book_id=bid,
                                 profile=payload["chunk_profile"])
@@ -198,7 +198,8 @@ def ingest_one(path: str | Path, *, library: Library, store: IndexStore,
     try:
         parser = _resolve_parser(library, bid, profile)
         parsed = parse_source(p, profile=parser, book_id=bid,
-                              page_range=_book_page_range(library, bid))
+                              page_range=_book_page_range(library, bid),
+                              log=log if log else None)
         _guard_quality(parsed)
         profile_obj = _resolve_profile(library, bid, chunk_profile)
         chunks = chunk_markdown(parsed.markdown, book_id=bid, profile=profile_obj)
@@ -253,7 +254,8 @@ def ingest_piece(path: str | Path, *, library: Library, store: IndexStore,
     try:
         for span in pending:
             rng = f"{span[0]}-{span[1]}"
-            parsed = parse_source(path, profile=parser, book_id=bid, page_range=rng)
+            parsed = parse_source(path, profile=parser, book_id=bid, page_range=rng,
+                                  log=log if log else None)
             _guard_quality(parsed)
             chunks = chunk_markdown(parsed.markdown, book_id=bid,
                                     profile=chunk_profile, start_seq=seq)

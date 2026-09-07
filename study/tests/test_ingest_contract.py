@@ -123,7 +123,7 @@ def test_ingest_respects_per_book_parser_precedence(tmp_path, monkeypatch):
 
     seen: dict[str, str | None] = {}
 
-    def fake_parse_source(path, *, profile=None, book_id="", page_range=None):
+    def fake_parse_source(path, *, profile=None, book_id="", page_range=None, log=None):
         from study_lib.parse import ParsedBook
         seen[book_id] = profile
         return ParsedBook(book_id=book_id or Path(path).stem,
@@ -156,7 +156,7 @@ def test_ingest_respects_per_book_page_range(tmp_path, monkeypatch):
 
     seen: dict[str, object] = {}
 
-    def fake_parse_source(path, *, profile=None, book_id="", page_range=None):
+    def fake_parse_source(path, *, profile=None, book_id="", page_range=None, log=None):
         from study_lib.parse import ParsedBook
         seen["page_range"] = page_range
         return ParsedBook(book_id=book_id or Path(path).stem,

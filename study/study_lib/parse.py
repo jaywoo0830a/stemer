@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -281,19 +282,54 @@ class DoclingParser:
     name = "docling"
 
     def parse(self, path: str | Path, *, book_id: str = "",
-              page_range: tuple[int, int] | None = None) -> ParsedBook:
+              page_range: tuple[int, int] | None = None,
+              log=None) -> ParsedBook:
         if not _has_module("docling"):
             raise RuntimeError(
                 "docling parser needs optional 'docling' (pip install docling). "
                 "텍스트 PDF면 profile='fast' 가 훨씬 빠릅니다."
             )
         p = Path(path)
+        label = book_id or p.stem
+
+        if page_range is None:
+            # 이전 동작 그대로: 전체를 한 번에 (진행 로그 없이)
+            converter = _build_docling_converter()
+            result = converter.convert(str(p))
+            markdown = result.document.export_to_markdown()
+            return ParsedBook(book_id=book_id or p.stem, title=p.stem,
+                              markdown=markdown, parser=self.name,
+                              pages=None, source=str(p))
+
+        # 페이지를 배치로 나눠 하나의 converter(모델 캐시)로 순차 파싱 + 진행 로그.
+        # docling 은 page_range 전체를 한 번에 블로킹하므로 그 사이는 멈춘 듯 보였다.
+        # 배치마다 "전체 N 중 현재 i 페이지 (P%)" 를 찍어 중간 진행을 보이게 한다.
+        start, end = page_range
+        total = end - start + 1
+        formulas = os.environ.get("DOCLING_FORMULAS", "0") == "1"
+        batch = int(os.environ.get("DOCLING_BATCH", "5" if formulas else "20"))
+        batch = max(1, batch)
+
         converter = _build_docling_converter()
-        kwargs = {}
-        if page_range is not None:
-            kwargs["page_range"] = page_range   # (start, end) 1-based inclusive
-        result = converter.convert(str(p), **kwargs)
-        markdown = result.document.export_to_markdown()
+        md_parts: list[str] = []
+        t0 = time.monotonic() if log else None
+        lo = start
+        while lo <= end:
+            hi = min(lo + batch - 1, end)
+            if log:
+                pct = (lo - start + 1) / total * 100
+                el = time.monotonic() - t0 if t0 is not None else 0
+                log(f"[{label}] docling 파싱 {lo}-{end} 중 "
+                    f"{lo - start + 1}/{total} 페이지 ({pct:.0f}%) "
+                    f"elapsed {el:.0f}s")
+            res = converter.convert(str(p), page_range=(lo, hi))
+            md_parts.append(res.document.export_to_markdown())
+            lo = hi + 1
+        markdown = "\n\n".join(md_parts)
+        if log:
+            el = time.monotonic() - t0 if t0 is not None else 0
+            log(f"[{label}] docling 완료 {start}-{end} ({total} pages, {el:.0f}s), "
+                f"chars={len(markdown)}")
         return ParsedBook(book_id=book_id or p.stem, title=p.stem, markdown=markdown,
                           parser=self.name, pages=None, source=str(p))
 
@@ -343,12 +379,18 @@ def resolve_profile(path: str | Path | None, profile: str | None = None) -> str:
 
 def parse_source(path: str | Path, *, profile: str | None = None,
                  book_id: str = "",
-                 page_range: str | tuple[int, int] | None = None) -> ParsedBook:
+                 page_range: str | tuple[int, int] | None = None,
+                 log=None) -> ParsedBook:
     """클라이언트가 쓰는 진입점 — 파일 → ParsedBook.
 
     page_range: '42-1249'(1-based inclusive) 문자열 또는 (start, end) 튜플.
+    log: 진행 로그 콜백(예: print) — docling 배치 파싱 중 위치/진행% 출력용.
     """
     name = resolve_profile(path, profile)
     if isinstance(page_range, str):
         page_range = parse_page_range(page_range)
-    return get_parser(name).parse(path, book_id=book_id, page_range=page_range)
+    parser = get_parser(name)
+    # docling 만 배치 진행 로그 지원(log 는 선택; 다른 파서는 무시)
+    if name == "docling":
+        return parser.parse(path, book_id=book_id, page_range=page_range, log=log)
+    return parser.parse(path, book_id=book_id, page_range=page_range)
