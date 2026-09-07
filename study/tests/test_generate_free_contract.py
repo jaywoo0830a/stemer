@@ -60,7 +60,9 @@ class _SeqLLM:
 
 def test_run_free_parts_writes_three_files_and_combined(tmp_path):
     from study_lib.generate_free import run_free_parts, PART_ORDER
-    llm = _SeqLLM(["CONCEPT_BODY", "EXAMPLES_BODY", "PRACTICE_BODY"])
+    llm = _SeqLLM(["## Reading the Topic\n\nCONCEPT_BODY",
+                   "## Worked examples\n\nEXAMPLES_BODY",
+                   "## Practice problems\n\nPRACTICE_BODY"])
     path = run_free_parts(_topic(), llm, ["p1", "p2"], tmp_path)
     # 3번 호출, 전부 json_object=False
     assert len(llm.calls) == len(PART_ORDER) == 3
@@ -80,16 +82,27 @@ def test_run_free_parts_partial_reuses_existing_parts(tmp_path):
     """examples 만 재생성해도 기존 concept/practice 파일을 병합에 재사용."""
     from study_lib.generate_free import run_free_parts
     # 먼저 전체 생성
-    llm1 = _SeqLLM(["C1", "E1", "P1"])
+    llm1 = _SeqLLM(["## Reading the Topic\n\nC1", "## Worked examples\n\nE1",
+                    "## Practice problems\n\nP1"])
     run_free_parts(_topic(), llm1, ["p"], tmp_path)
     # 이번엔 examples 만
-    llm2 = _SeqLLM(["E2_NEW"])
+    llm2 = _SeqLLM(["## Worked examples\n\nE2_NEW"])
     run_free_parts(_topic(), llm2, ["p"], tmp_path, parts=["examples"])
     assert llm2.calls and [(c.get("max_tokens")) for c in llm2.calls]
     assert len(llm2.calls) == 1
     combo = (tmp_path / "미적분-11-3.md").read_text(encoding="utf-8")
     assert "E2_NEW" in combo          # 새 예제 반영
     assert "C1" in combo and "P1" in combo   # 기존 개념/연습 보존
+
+
+def test_run_free_parts_rejects_reasoning_leak_without_heading(tmp_path):
+    """헤딩 없는 body(=think 누출)는 저장하지 않고 전체실패로 취급."""
+    from study_lib.generate_free import run_free_parts
+    llm = _SeqLLM(["Okay so I'm trying to understand... no heading used."])
+    with pytest.raises(Exception):
+        run_free_parts(_topic(), llm, ["p"], tmp_path, parts=["concept"])
+    assert not (tmp_path / "미적분-11-3.concept.md").exists()  # 저장 안 됨
+    assert not (tmp_path / "미적분-11-3.md").exists()
 
 
 def test_pack_passages_respects_budget_keeps_prefix_order():

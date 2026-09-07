@@ -45,48 +45,77 @@ class LocalClient:
         self.timeout = timeout
 
     def _chat(self, system: str, user: str, max_tokens: int) -> str:
-        """llama.cpp `/completion`(v1 없음, 단일 prompt) 을 사용해
-        chat messages 의 콘텐츠 배열/문자열 파서 불안정을 우회한다."""
+        """llama.cpp `chat`(reasoning 분리)를 우선 쓰고 실패/빈 응답이면 `completion`
+        원시 단일-스트림으로 폴백한다.
+
+        R1 계열은 `completion` 단일 스트림에선 생각(think)을 content 로 그대로 뱉어
+        학습자료로 못 쓴다. `v1/chat` 은 일부 서버가 생각을 `reasoning_content` 로
+        떼고 `content` 에 최종 마크다운만 준다 → content 가 깨끗해진다.
+        LOCAL_LLM_CHAT=0 이면 completion 강제, 1 이면 chat 강제, 기본(auto)은
+        chat 실패 시 completion 으로 넘어간다.
+        """
         import httpx  # 선택 의존성
-        if os.environ.get("LOCAL_LLM_CHAT", "0") == "1":
-            body = {
-                "messages": [
+        mode = os.environ.get("LOCAL_LLM_CHAT", "auto").strip().lower()
+
+        def _post(url: str, body: dict) -> "httpx.Response":
+            with httpx.Client(timeout=self.timeout) as c:
+                return c.post(url, json=body)
+
+        def _extract(data: dict) -> str:
+            # /v1/chat: message.content (reasoning_content 는 무시 → 깨끗한 답)
+            if "choices" in data:
+                msg = data["choices"][0].get("message", {})
+                content = msg.get("content") or ""
+            else:
+                # raw /completion: {"content": ...} (think+답 혼재 가능)
+                content = data.get("content") or ""
+            if isinstance(content, list):
+                parts: list[str] = []
+                for p in content:
+                    parts.append(p.get("text", "") if isinstance(p, dict)
+                                 else str(p))
+                content = "".join(parts)
+            return str(content or "").strip()
+
+        chat_candidates = []          # (url, body)
+        if mode != "0":               # auto or 1
+            chat_candidates.append((
+                f"{self.base_url}/v1/chat/completions",
+                {"messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
-                ],
-                "temperature": 0.0,
-                "max_tokens": max_tokens,
-                "stream": False,
-            }
-            url = f"{self.base_url}/v1/chat/completions"
-        else:
+                ], "temperature": 0.0, "max_tokens": max_tokens,
+                    "stream": False},
+            ))
+        if mode != "1":               # auto or 0
             prompt = (system + "\n\n" + user).strip()
-            body = {"prompt": prompt, "max_tokens": max_tokens,
-                    "temperature": 0.0, "stream": False}
-            url = f"{self.base_url}/completion"
-        try:
-            with httpx.Client(timeout=self.timeout) as c:
-                r = c.post(url, json=body)
-            if r.status_code >= 400:
-                raise LLMError(f"local llm HTTP {r.status_code}: {r.text[:200]}")
-        except LLMError:
-            raise
-        except Exception as exc:
-            raise LLMError(f"local llm failed: {exc}") from None
-        try:
-            data = r.json()
-            if "choices" in data:          # /v1/chat
-                raw = data["choices"][0]["message"]
-                content = raw.get("content") or ""
-            else:
-                content = data.get("content") or ""   # /completion
-            if isinstance(content, list):  # 호환
-                content = "".join(
-                    (p.get("text", "") if isinstance(p, dict) else str(p))
-                    for p in content)
-            return content or ""
-        except Exception as exc:  # noqa: BLE001
-            raise LLMError(f"local llm bad response: {exc}") from None
+            chat_candidates.append((
+                f"{self.base_url}/completion",
+                {"prompt": prompt, "max_tokens": max_tokens,
+                 "temperature": 0.0, "stream": False},
+            ))
+
+        last_err: Exception | None = None
+        for url, body in chat_candidates:
+            try:
+                r = _post(url, body)
+                if r.status_code >= 400:
+                    raise LLMError(
+                        f"local llm HTTP {r.status_code} on {url}: "
+                        f"{r.text[:150]}")
+                content = _extract(r.json()).strip()
+                if content:
+                    return content
+                # 빈 content → 다음 후보(completion) 시도
+            except LLMError as exc:
+                last_err = exc
+                continue
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                continue
+        if last_err:
+            raise LLMError(f"local llm failed: {last_err}")
+        return ""
 
     def count_tokens(self, text: str) -> int:
         """llama.cpp 서버의 `/tokenize` 로 정확한 토큰 수를 센다(추정이 아닌 실측).

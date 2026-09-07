@@ -262,6 +262,14 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
             continue
         body = res.content if isinstance(res.content, str) else str(res.content)
         body = (body or "").strip()
+        # 품질 가드: 우리 part 는 항상 마크다운 섹션 헤딩("## ...")을 요구한다.
+        # 헤딩이 없으면 = R1 이 생각(think)을 content 로 그대로 뱉은 강의식 난독산문일
+        # 가능성이 크므로 저장하지 않고 실패 처리(다음 재시도/재실행에서 다시).
+        if "## " not in body:
+            print(f"[free:{part}] REJECTED {topic.topic_id}: body has no "
+                  f"'## ' section heading ({len(body)} chars) — looks like "
+                  f"reasoning-leak, not saved", file=sys.stderr, flush=True)
+            continue
         part_bodies[part] = body
         generated.append(part)
         pf = Path(base) / f"{topic.topic_id}.{part}.md"
