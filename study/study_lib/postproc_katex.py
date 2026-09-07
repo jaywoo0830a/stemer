@@ -74,7 +74,7 @@ class OllamaClient:
     """Ollama /api/generate 경량 클라이언트 (표준 urllib — 추가 의존성 없음)."""
 
     def __init__(self, *, base_url: str = "http://host.docker.internal:11434",
-                 model: str = "qwen2.5:3b", timeout: float = 120.0) -> None:
+                 model: str = "qwen2.5:3b", timeout: float = 1200.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
@@ -85,7 +85,7 @@ class OllamaClient:
             "prompt": prompt,
             "system": system or None,
             "stream": False,
-            "options": {"temperature": 0.0, "num_ctx": 8192},
+            "options": {"temperature": 0.0, "num_ctx": 8192, "num_predict": 8000},
         }
         req = urllib.request.Request(
             f"{self.base_url}/api/generate",
