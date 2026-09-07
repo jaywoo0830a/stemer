@@ -26,6 +26,7 @@ from .embed import StubEmbedder, TransformerEmbedder
 from .factory import generate_one
 from .ingest import ingest_dir, ingest_one, ingest_piece
 from .llm import FlashClient, LLMError
+from .llm_local import pick_generate_llm
 from .parse import parse_source, parser_names
 from .profiles import load_profile, profile_names
 from .protocol import load_schema
@@ -465,7 +466,7 @@ def _generate(ws: Workspace, args) -> int:
     store.load_all()
     schema = load_schema()
     embedder = _resolve_embedder(args.embedder)
-    llm = FlashClient()  # 설정 누락 시 LLMError → main 이 안내
+    llm = pick_generate_llm()  # LOCAL_LLM=1 → lokál Ollama, 아니면 DeepSeek Flash
     guide = _load_guide(args.guide, topics[0].subject)
 
     done = failed = 0
