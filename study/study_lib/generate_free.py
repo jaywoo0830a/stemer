@@ -27,37 +27,78 @@ _FRONT = (
     "---\n\n"
 )
 
-SYSTEM = (
-    "You are a patient math/sciences tutor writing concise study notes for one topic.\n"
-    "RULES:\n"
-    "- Write in Korean, human-readable prose that builds understanding (not a rigid "
-    "box list): start from what the idea answers, then definitions+why, key formulas, "
-    "common mistake, then WORKED EXAMPLE(S) and PRACTICE problems -- grounded in the "
-    "given textbook passages (cite source like (교재 EXAMPLE 3) or (11.3 Exercises #7)).\n"
-    "- Markdown only. Wrap every math expression in $...$; one short symbol inline, "
-    "do not leave bare math outside $."
-)
+import os
 
-USER_TPL = (
-    "TOPIC: {topic}\n"
-    "BOOK: {book}   SECTION: {section}   SUBJECT: {subject}\n\n"
-    "교재 출처 passage (필요한 만큼 참고):\n"
-    "{passages}\n\n"
-    "위 토픽의 학습자료(markdown 본문만, header 없이)를 작성하라."
-)
+# 언어에 따른 프롬프트 조각. LOCAL_FREE_LANG=ko 이면 한글로, 기본은 영어.
+_LANG = {
+    "en": {
+        "system": (
+            "You are a patient math/sciences tutor writing concise study notes for one topic.\n"
+            "RULES:\n"
+            "- Write in English, human-readable prose that builds understanding (not a rigid "
+            "box list): start from what the idea answers, then definitions+why, key formulas, "
+            "common mistake, then WORKED EXAMPLE(S) and PRACTICE problems -- grounded in the "
+            "given textbook passages (cite source like (textbook EXAMPLE 3) or (11.3 Exercises #7)).\n"
+            "- Markdown only. Wrap every math expression in $...$; one short symbol inline, "
+            "do not leave bare math outside $."
+        ),
+        "user": (
+            "TOPIC: {topic}\n"
+            "BOOK: {book}   SECTION: {section}   SUBJECT: {subject}\n\n"
+            "Textbook source passage (consult as needed):\n"
+            "{passages}\n\n"
+            "Write the study note for this topic (markdown body only, no YAML header)."
+        ),
+        "cite": "textbook EXAMPLE 3",
+    },
+    "ko": {
+        "system": (
+            "You are a patient math/sciences tutor writing concise study notes for one topic.\n"
+            "RULES:\n"
+            "- Write in Korean, human-readable prose that builds understanding (not a rigid "
+            "box list): start from what the idea answers, then definitions+why, key formulas, "
+            "common mistake, then WORKED EXAMPLE(S) and PRACTICE problems -- grounded in the "
+            "given textbook passages (cite source like (교재 EXAMPLE 3) or (11.3 Exercises #7)).\n"
+            "- Markdown only. Wrap every math expression in $...$; one short symbol inline, "
+            "do not leave bare math outside $."
+        ),
+        "user": (
+            "TOPIC: {topic}\n"
+            "BOOK: {book}   SECTION: {section}   SUBJECT: {subject}\n\n"
+            "교재 출처 passage (필요한 만큼 참고):\n"
+            "{passages}\n\n"
+            "위 토픽의 학습자료(markdown 본문만, header 없이)를 작성하라."
+        ),
+        "cite": "교재 EXAMPLE 3",
+    },
+}
+
+
+def _free_lang() -> str:
+    lang = os.environ.get("LOCAL_FREE_LANG", "en").strip().lower()
+    return lang if lang in _LANG else "en"
+
+
+def _prompts() -> dict:
+    return _LANG[_free_lang()]
+
+
+def system_prompt() -> str:
+    return _prompts()["system"]
 
 
 def build_user(topic, passages) -> str:
     src = "\n\n".join(f"[{i}] {p}" for i, p in enumerate(passages, 1))
-    return USER_TPL.format(topic=topic.title or topic.topic_id,
-                           book=topic.book_id, section=topic.section or "-",
-                           subject=topic.subject, passages=src)
+    return _prompts()["user"].format(
+        topic=topic.title or topic.topic_id,
+        book=topic.book_id, section=topic.section or "-",
+        subject=topic.subject, passages=src)
 
 
 def run_free_one(topic, llm, passages, notes_dir: str | Path) -> str:
     """topic 의 자유 md 학습자료를 notes_dir/<topic>.md 로 저장, 경로 반환."""
     try:
-        res = llm.complete(system=SYSTEM, user=build_user(topic, passages),
+        res = llm.complete(system=system_prompt(), user=build_user(topic, passages),
                            max_tokens=16000, json_object=False)
     except Exception as exc:  # noqa: BLE001
         raise exc
