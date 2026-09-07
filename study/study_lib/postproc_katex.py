@@ -37,14 +37,21 @@ def _strip_math(text: str) -> str:
     return out
 
 
-def plain_signature(markdown: str) -> str:
-    """수식을 지운 뒤 공백/개행을 모두 제거한 문장 서명 — 일치 시 구조 불변."""
-    return re.sub(r"\s+", "", _strip_math(markdown))
+_WORD_RE = re.compile(r"[0-9A-Za-z가-힣]+")
+
+
+def word_signature(markdown: str) -> list:
+    """수식 밖 텍스트에서 단어(한글/영문/숫자) 토큰만 순서대로 추출(lower).
+
+    display 승격/개행 리플로우로 문장부호·공백·줄바꿈이 바뀌어도, 단어 내용·순서가
+    같으면 '결과물(문장 내용/출처/번호)은 보존'된 것으로 본다.
+    """
+    return [t.lower() for t in _WORD_RE.findall(_strip_math(markdown))]
 
 
 def text_preserved(original: str, candidate: str) -> bool:
-    """후보가 원문과 문장·출처·번호(비수식 텍스트)가 동일한가."""
-    return plain_signature(original) == plain_signature(candidate)
+    """후보가 원문과 문장·출처·번호의 '단어 내용·순서'를 보존하는가."""
+    return word_signature(original) == word_signature(candidate)
 
 
 def _empty_math(text: str) -> bool:

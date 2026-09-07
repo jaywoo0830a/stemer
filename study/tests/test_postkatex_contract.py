@@ -9,9 +9,9 @@ import pytest
 
 from study_lib.postproc_katex import (
     guard_ok,
-    plain_signature,
     refine_with,
     text_preserved,
+    word_signature,
 )
 
 NOTE = (
@@ -41,15 +41,20 @@ def _display_only(md: str) -> str:
     )
 
 
-def test_plain_signature_ignores_math_only_locations():
-    # 수식 내용/배치만 다르면 비수식 서명은 동일 (문장 보존 기능)
+def test_word_signature_ignores_math_and_punctuation_reflow():
+    # 수식 내용/배치·문장부호·개행이 바뀌어도 단어 내용·순서가 같으면 보존으로 본다
     a = "Series $\\sum_n x$ and $x^2$ end."
     b = "Series $$\\sum_n x$$ and\n$x^2$ end."
-    assert plain_signature(a) == plain_signature(b)
+    assert word_signature(a) == word_signature(b)
 
 
-def test_text_preserved_rejects_when_words_change():
-    assert not text_preserved(NOTE, "Changed word here" + NOTE[12:])
+def test_text_preserved_keeps_display_promotion_but_rejects_word_change():
+    # display 로 인라인 $ 를 개별 라인으로 승격해도 단어는 보존 → 허용
+    a = "Test $f$ converges $\\iff$ $I$."
+    b = "Test $$f$$ converges\n\n$$\\iff$$\n\n$$I$$."
+    assert text_preserved(a, b)
+    # 단어 자체가 바뀌면 거절
+    assert not text_preserved(NOTE, NOTE.replace("series", "sum"))
     assert not text_preserved(NOTE, NOTE + " EXTRA sentence.")
 
 
