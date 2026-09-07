@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .llm import LLMError
 from .registry import DRAFT
 
 _FRONT = (
@@ -226,29 +227,45 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
                    parts=PART_ORDER, *, return_combined: bool = True) -> str:
     """topic 에 대해 일부(기본 전체) 부분을 생성·저장하고 병합본을 쓴다.
 
-    parts 에 없는 나머지 부분은 이미 디스크에 있는 <topic>.<part>.md 본문을
-    재사용해 병합에 포함한다(있을 때만). 단일 슬롯 llama-server 를 순차 사용.
+    각 부분은 완료 즉시 자기 파일(<topic>.<part>.md)에 저장한다. 부분 하나가
+    실패해도 이후 부분은 계속 진행(장시간 무인 실행용). realtime log 는 들을 수
+    있도록 각 부분 완료/실패를 stdout 에 남긴다(log 인자).
+    parts 에 없는 나머지는 디스크의 기존 <topic>.<part>.md 를 재사용해 병합에
+    포함한다. 전부 실패(재사용할 것도 없음)면 마지막에 LLMError 를 던진다.
     병합본 notes/<topic>.md 경로를 반환한다.
     """
+    import sys
+
     topic_vars = dict(title=topic.title or topic.topic_id, subject=topic.subject,
                       book=topic.book_id, section=topic.section or "-")
     base = Path(notes_dir)
     base.mkdir(parents=True, exist_ok=True)
 
     part_bodies: dict[str, str] = {}
-    # 새로 생성할 부분
+    generated: list[str] = []
+    # 새로 생성할 부분 (부분별로 독립 생성·저장 — 실패해도 나머지는 계속)
     for part in parts:
         sysp = _part_system(part)
         usrp = _part_user(topic, passages, part)
-        res = llm.complete(system=sysp, user=usrp,
-                           max_tokens=_PART_MAX.get(part, 8000),
-                           json_object=False)
+        print(f"[free:{part}] generating {topic.topic_id} "
+              f"(max_tokens={_PART_MAX.get(part, 8000)})...", flush=True)
+        try:
+            res = llm.complete(system=sysp, user=usrp,
+                               max_tokens=_PART_MAX.get(part, 8000),
+                               json_object=False)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[free:{part}] FAILED {topic.topic_id}: {exc}",
+                  file=sys.stderr, flush=True)
+            continue
         body = res.content if isinstance(res.content, str) else str(res.content)
         body = (body or "").strip()
         part_bodies[part] = body
+        generated.append(part)
         pf = Path(base) / f"{topic.topic_id}.{part}.md"
         pf.write_text(_HEADER.format(part=part, **topic_vars) + body + "\n",
                       encoding="utf-8")
+        print(f"[free:{part}] done -> {pf.name} ({len(body)} chars)",
+              flush=True)
     # 생성하지 않은 나머지 부분: 디스크에 있으면 병합에 재사용
     for part in PART_ORDER:
         if part not in part_bodies:
@@ -256,10 +273,17 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
             if existing:
                 part_bodies[part] = existing
 
-    combined = (base / f"{topic.topic_id}.md")
     body_chunks = [part_bodies[p] for p in PART_ORDER if part_bodies.get(p)]
+    if not body_chunks:
+        raise LLMError(
+            f"all requested parts failed for {topic.topic_id} and no part file "
+            "exists on disk to reuse")
+    combined = (base / f"{topic.topic_id}.md")
     combined.write_text(_FRONT.format(**topic_vars) + "\n\n".join(body_chunks)
                         + "\n", encoding="utf-8")
+    ok_parts = [p for p in PART_ORDER if p in part_bodies]
+    print(f"[free] merged {topic.topic_id}: ok_parts={ok_parts} "
+          f"-> {combined.name}", flush=True)
     return str(combined)
 
 

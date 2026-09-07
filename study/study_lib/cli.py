@@ -469,39 +469,52 @@ def _generate_free(ws: Workspace, args) -> int:
     if args.limit and args.limit > 0:
         topics = topics[:args.limit]
     if not topics:
-        print("no pending topics")
+        print("no pending topics", flush=True)
         return 0
+
+    def now() -> str:
+        import datetime
+        return datetime.datetime.now().strftime("%H:%M:%S")
+
     store = ws.open_store()
     store.load_all()
     embedder = _resolve_embedder(args.embedder)
     llm = LocalClient()          # 로컬 llama-server (LOCAL_LLM_BASE)
     in_budget = input_budget()
-    print(f"[generate-free] model-base={llm.base_url} topics={len(topics)} "
-          f"parts={parts} input≤{in_budget}t (부분 분할·직접 markdown, English)")
+    print(f"[{now()}] [generate-free] model-base={llm.base_url} "
+          f"topics={len(topics)} parts={parts} input≤{in_budget}t "
+          f"(English)", flush=True)
     done = failed = 0
+    import time as _t
     for topic in topics:
+        t0 = _t.time()
         # 넉넉한 후보 풀(primary 섹션 + 상위 crossref) → 관련성 우선 목록
         ctx = retrieve(topic, store=store, embedder=embedder,
                        n_candidates=400, n_crossref=200)
         all_texts = ctx.texts()
         if not all_texts:
-            print(f"skip  {topic.topic_id}: store 에 grounded passage 없음 "
-                  f"(index/accumulate 선행 필요)", file=sys.stderr)
+            print(f"[{now()}] skip  {topic.topic_id}: grounded passage 없음 "
+                  f"(index/accumulate 선행 필요)", file=sys.stderr, flush=True)
             failed += 1
             continue
         passages = pack_passages(all_texts, in_budget,
                                  count_tokens=llm.count_tokens)
+        print(f"[{now()}] [{topic.topic_id}] start parts={parts} "
+              f"passages {len(all_texts)}→{len(passages)}", flush=True)
         try:
             note = run_free_parts(topic, llm, passages, ws.notes, parts=parts)
             lib.set_status(topic.topic_id, DRAFT, note_path=note)
             lib.save()
             done += 1
-            print(f"draft {topic.topic_id} -> {note} "
-                  f"(passages={len(all_texts)}→used={len(passages)})")
+            mins = (_t.time() - t0) / 60
+            print(f"[{now()}] draft {topic.topic_id} -> {note} "
+                  f"(elapsed={mins:.1f}min)", flush=True)
         except Exception as exc:  # noqa: BLE001
             failed += 1
-            print(f"failed {topic.topic_id}: {exc}", file=sys.stderr)
-    print(f"done={done} failed={failed}")
+            mins = (_t.time() - t0) / 60
+            print(f"[{now()}] failed {topic.topic_id}: {exc} "
+                  f"(elapsed={mins:.1f}min)", file=sys.stderr, flush=True)
+    print(f"[{now()}] done={done} failed={failed}", flush=True)
     return 1 if failed else 0
 
 
