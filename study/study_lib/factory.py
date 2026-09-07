@@ -13,6 +13,7 @@ render → figures(교재 원본만) → 파일 저장 → registry `todo→draf
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from .protocol import Schema, validate
 from .registry import DRAFT, Library
 from .render import render_guide
 from .retrieve import retrieve
+from .postproc_katex import postkatex_if_enabled
 
 SYSTEM_TEMPLATE = (
     "You generate concise textbook study-guide content for one topic.\n"
@@ -230,6 +232,8 @@ def generate_one(topic: object, *, library: Library, store: object,
     path = Path(notes_dir) / f"{topic.topic_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(markdown, encoding="utf-8")
+    if os.environ.get("POSTKATEX", "0") == "1":   # 로컬 Ollama 후처리(무료)
+        postkatex_if_enabled(path)
 
     library.set_status(topic.topic_id, DRAFT, note_path=str(path))
     library.save()

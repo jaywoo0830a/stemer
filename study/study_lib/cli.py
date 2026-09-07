@@ -32,6 +32,7 @@ from .protocol import load_schema
 from .registry import INDEXED, JsonFileStore, Library
 from .store import IndexStore, JsonDurableSink
 from .subjects import SUBJECTS
+from .postproc_katex import default_ollama_client, guard_ok, postkatex_if_enabled
 
 
 @dataclass
@@ -285,6 +286,37 @@ def _ingest_piece(ws: Workspace, args) -> int:
     return 0
 
 
+# ---- postkatex (로컬 Ollama 로 완성된 note 의 수식만 다양화/후처리) ----
+def _postkatex_cmd(ws: Workspace, args) -> int:
+    lib = ws.library()
+    targets: list[Path] = []
+    if args.path:
+        targets = [Path(args.path)]
+    elif args.book:
+        targets = [Path(t.note_path) for t in lib.topics(book_id=args.book)
+                   if t.note_path and Path(t.note_path).exists()]
+    else:
+        print("error: pass --path FILE or --book", file=sys.stderr)
+        return 2
+    if not targets:
+        print("no note files matched")
+        return 0
+    client = default_ollama_client()
+    print(f"[postkatex] model={client.model} host={client.base_url} "
+          f"files={len(targets)}")
+    changed = kept = 0
+    for p in targets:
+        before = p.read_text(encoding="utf-8")
+        out = postkatex_if_enabled(p, force=True)   # env 없어도 force
+        if out and out != before:
+            changed += 1
+            print(f"reformatted {p.name}")
+        else:
+            kept += 1
+    print(f"done: changed={changed} kept={kept}")
+    return 0
+
+
 # ---- chapter focus (챕터 단위 소규모 재인제스트) ----
 # 챕터는 사용자가 직접 페이지 범위(--range)로 지정한다.
 # EXAMPLES:  python -m study_lib.cli chapter focus --book calc --range 42-90
@@ -494,6 +526,11 @@ def build_parser() -> argparse.ArgumentParser:
     acc.add_argument("--source", help="PDF 경로(명시 안 하면 책 메타 source)")
     acc.add_argument("--chunk-profile", choices=list(profile_names()))
     acc.set_defaults(func=_ingest_piece)
+
+    pk = subp("postkatex")
+    pk.add_argument("--path", help="개별 note 파일 후처리")
+    pk.add_argument("--book", help="책의 모든 draft note 파일 후처리")
+    pk.set_defaults(func=_postkatex_cmd)
 
     # ---- chapter focus: 챕터는 사용자가 페이지 범위로 직접 지정 ----
     chap = subp("chapter")
