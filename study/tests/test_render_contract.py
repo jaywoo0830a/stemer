@@ -92,3 +92,33 @@ def test_problems_kind_renders_solved_problems_with_level():
     assert "### Advanced Problem 2" in md
     assert "**Solution.**" in md
     assert "## Concepts" not in md
+
+
+LECTURE_PAYLOAD = {
+    "lecture": ("We ask when an infinite tail can be summed. The key turn is to "
+                "compare a sequence with an integral.\n\n"
+                "A sequence $(a_n)$ has limit $L$ iff its tail fits in any "
+                "epsilon band; only far-out terms matter."),
+    "cs": EXAM_PAYLOAD["cs"],
+    "ex": [{"src": "EXAMPLE 3", "p": "Prove a_n=n/(n+1)→1.",
+            "s": "|a_n-1|=1/(n+1)."},],
+    "pr": ["It's a problem string"],
+}
+
+
+def test_lecture_renders_first_and_preserves_prose():
+    md = render_guide(LECTURE_PAYLOAD, title="T", subject="math", kind="exam")
+    # lecture 가 cs 보다 먼저(서술 개관)
+    p = _positions(md, "## Reading the Topic", "## Concepts")
+    assert all(x != -1 for x in p)
+    assert p[0] < p[1]
+    # 문단(빈 줄)과 수식이 보존
+    assert "We ask when an infinite tail can be summed." in md
+    assert "$(a_n)$ has limit $L$" in md
+
+
+def test_work_example_citation_block_renders():
+    md = render_guide(LECTURE_PAYLOAD, title="T", subject="math", kind="exam")
+    assert "### Worked example 1" in md
+    assert "> 출처: EXAMPLE 3" in md
+

@@ -2,6 +2,7 @@
   "version": "v1",
   "keys": {
     "core": {
+      "lecture": "강의식 풀이 설명 — 토픽을 처음부터 끝까지 자연스럽게 읽는 서술 문단(다단락, 정의→직관→공식이 나온 맥락)",
       "cs": "개념 슬롯 배열",
       "c": "개념명",
       "d": "정의",
@@ -24,13 +25,15 @@
   },
   "kinds": {
     "exam": {
+      "lecture": { "type": "string", "budget": 1500 },
       "cs": { "type": "array", "max": 3, "fields": { "c": { "budget": 12 }, "d": { "budget": 90 }, "f": { "budget": 70 }, "k": { "budget": 45 }, "m": { "budget": 45 } } },
       "r": { "type": "string", "budget": 140 },
       "as": { "type": "array", "max": 3, "budget": 50 },
-      "ex": { "type": "array", "max": 3, "fields": { "p": { "budget": 100 }, "s": { "budget": 160 } } },
-      "pr": { "type": "array", "max": 4, "budget": 70 }
+      "ex": { "type": "array", "max": 6, "fields": { "src": { "budget": 20 }, "p": { "budget": 100 }, "s": { "budget": 160 } } },
+      "pr": { "type": "array", "max": 8, "budget": 110 }
     },
     "note": {
+      "lecture": { "type": "string", "budget": 1500 },
       "cs": { "type": "array", "max": 3, "fields": { "c": { "budget": 12 }, "d": { "budget": 90 }, "f": { "budget": 70 }, "k": { "budget": 45 }, "m": { "budget": 45 } } },
       "r": { "type": "string", "budget": 140 },
       "as": { "type": "array", "max": 3, "budget": 50 }

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 # kind 별 핵심 슬롯 렌더 순서
 CORE_ORDER: dict[str, tuple[str, ...]] = {
-    "exam": ("cs", "r", "as", "ex", "pr"),
-    "note": ("cs", "r", "as"),
+    "exam": ("lecture", "cs", "r", "as", "ex", "pr"),
+    "note": ("lecture", "cs", "r", "as"),
     "problems": ("pr",),
 }
 
@@ -68,6 +68,8 @@ def _render_solved_problems(items: list[dict]) -> str:
 
 
 def _render_core(key: str, value: object, kind: str) -> str:
+    if key == "lecture" and isinstance(value, str):
+        return f"## Reading the Topic\n\n{value}"
     if key == "cs" and isinstance(value, list):
         blocks = [_concept_block(c) for c in value if isinstance(c, dict)]
         return "## Concepts\n\n" + "\n\n".join(blocks) if blocks else ""
@@ -81,8 +83,12 @@ def _render_core(key: str, value: object, kind: str) -> str:
         for i, e in enumerate(value, 1):
             if not isinstance(e, dict):
                 continue
-            parts.append(f"### Worked example {i}\n\n{e.get('p', '')}\n\n"
-                         f"**Solution.** {e.get('s', '')}")
+            src = e.get("src", "").strip()
+            src_line = ""
+            if src:
+                src_line = f"\n\n> 출처: {src}"
+            parts.append(f"### Worked example {i}\n\n{e.get('p', '')}"
+                         f"{src_line}\n\n**Solution.** {e.get('s', '')}")
         return "## Worked examples\n\n" + "\n\n".join(parts) if parts else ""
     if key == "pr" and isinstance(value, list):
         if value and isinstance(value[0], dict):   # problems kind: {lvl,p,s}

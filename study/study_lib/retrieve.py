@@ -111,8 +111,8 @@ def rerank_top(query: str, candidates: Sequence[RetrievedChunk],
 
 
 def retrieve(topic: object, *, store: IndexStore, embedder: Embedder,
-             reranker: Reranker | None = None, n_crossref: int = 5,
-             n_candidates: int = 20, rrf_k: int = 60) -> RetrievedContext:
+             reranker: Reranker | None = None, n_crossref: int = 10,
+             n_candidates: int = 30, rrf_k: int = 60) -> RetrievedContext:
     """클라이언트가 쓰는 진입점 — 토픽 → 생성용 컨텍스트."""
     book_id = topic.book_id
     query = topic.title or topic.topic_id
