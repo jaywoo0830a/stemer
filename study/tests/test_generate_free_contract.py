@@ -102,10 +102,31 @@ def test_pack_passages_respects_budget_keeps_prefix_order():
     assert packed == ps[:4]
 
 
-def test_input_budget_fills_independent_input_window():
+def test_input_budget_default_is_cpu_safe_and_capped():
+    """권고안 A: CPU 백엔드는 프롬프트를 ~4096 으로 제한. env 로만 상향."""
+    import os
     import study_lib.generate_free as g
+    assert g.DEFAULT_INPUT_TOKENS <= 4096
+    cap = g.MAX_INPUT - g._SCAFFOLD_EST
     b = g.input_budget()
-    # 독립 입력 창(32768)을 스캐폴드 정도만 제외하고 최대한 채운다.
-    assert b <= g.MAX_INPUT - g._SCAFFOLD_EST
-    assert b >= g.MAX_INPUT - g._SCAFFOLD_EST  # 기본값이 cap 을 채움
-    assert b >= 1000
+    assert 0 < b <= cap
+    if "LOCAL_FREE_INPUT_TOKENS" not in os.environ:
+        assert b == min(g.DEFAULT_INPUT_TOKENS, cap)
+
+
+def test_part_token_cap_bounded_by_input_budget():
+    import study_lib.generate_free as g
+    assert g.part_token_cap() <= g.input_budget()
+
+
+def test_passages_for_part_selects_subset_within_budget():
+    import study_lib.generate_free as g
+    ps = ["%05d introduction definition theorem continuous" % i for i in range(20)]
+    ps[3] = "EXAMPLE worked sample solution"
+    ps[8] = "Exercise practice problem #7"
+    # 좁은 예산(< 총량)을 걸어 '전체를 모두 다시 보내는 것'이 아닌 것을 검증
+    sub = g.passages_for_part("concept", ps, max_tokens=80,
+                              count_tokens=lambda s: max(1, len(s) // 3))
+    assert sub                        # 0개 아님
+    assert len(sub) < len(ps)         # 전체보다 줄었음 (=반복 전송 완화)
+    assert sub[0] == ps[0]            # core(primary 맨 앞) 유지

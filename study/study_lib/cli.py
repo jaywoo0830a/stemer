@@ -451,8 +451,10 @@ def _generate_free(ws: Workspace, args) -> int:
     """LOCAL_LLM_FREE=1 — 로컬 LLM 이 스키마 없이 `.md` 학습자료를 곧장 씀.
 
     부분 분할(run_free_parts): 개념/예제/연습·풀이를 각자 생성(단일 슬롯 순차),
-    개별 `<topic>.<part>.md` + 병합 `<topic>.md` 를 쓴다. 그래서 16000 토큰 한도에
-    한 번에 다 담다 잘리지 않는다.
+    개별 `<topic>.<part>.md` + 병합 `<topic>.md` 를 쓴다.
+    입력 passage 예산은 CPU 백엔드 한도(~4096, 권고안 A), 각 부분은 자신에게
+    관련 있는 passage 부분집합만 사용(권고안 B). 각 부분은 독립 요청이라 토픽 전체를
+    하나의 거대 요청으로 보내 ctx 를 넘거나 잘리지 않도록 한다.
     """
     from .generate_free import PART_ORDER, input_budget, pack_passages, \
         run_free_parts

@@ -114,7 +114,9 @@ class LocalClient:
     def complete(self, *, system: str, user: str, max_tokens: int = 1000,
                  json_object: bool = True) -> LLMResult:
         # reasoning 모델은 생각(reasoning)이 max 를 삼켜 content 가 빈 채
-        # finish(len)될 수 있다 → 1회 비었으면 max 를 배로 늘려 재시도(최대 3회).
+        # finish(len)될 수 있다 → 1회 비었으면 조금씩 늘려 재시도(최대 3회).
+        # CPU/작은 ctx(16384)에서는 max_tokens 를 키워도 ctx 를 못 넘으니
+        # 과도한 증배(×2)는 무의미 → 소폭(+2048)만 늘린다(권고안 D).
         mt = max_tokens
         raw = ""
         for _ in range(3):
@@ -130,7 +132,7 @@ class LocalClient:
                         "local model did not return a JSON object; head: "
                         + _head(raw, 200)
                     ) from None
-            mt = max(mt * 2, mt + 4000)   # reasoning 만 다 쓴 것 → 예산 확대
+            mt = mt + 2048   # reasoning 만 다 쓴 것 → 소폭 예산 확대
         raise LLMError("local model returned empty content (0/3)" + _tail(raw))
 
 

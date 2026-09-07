@@ -189,10 +189,10 @@ _EN_KICK = (
     "finish every example and every solution completely before stopping."
 )
 
-# 각 부분의 최대 생성 토큰. 세 부분 합계 ≈ 4k+7k+8k 토큰(강 모델·정성용).
-# 각 부분의 최대 생성 토큰(출력 창이 독립이라 넉넉히). 단일 요청의 max_tokens 는
-# 추론+답(content) 을 함께 자르므로 충분히 여유를 둔다.
-_PART_MAX = {"concept": 8000, "examples": 18000, "practice": 20000}
+# 각 부분의 최대 생성 토큰(권고안 C: ctx 16384 내 생성 여유에 맞춰 하향).
+# 프롬프트(≤~4k)/R1 reasoning 을 빼면 실질 마진은 이보다 작다. ctx 초과를 요청하면
+# llama-server 가 생성이 아니라 응답 단계에서 정리(빈/조기중단)되므로 과설정은 손해.
+_PART_MAX = {"concept": 6000, "examples": 8000, "practice": 10000}
 
 
 def _part_user(topic, passages, part: str) -> str:
@@ -246,9 +246,11 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
     # 새로 생성할 부분 (부분별로 독립 생성·저장 — 실패해도 나머지는 계속)
     for part in parts:
         sysp = _part_system(part)
-        usrp = _part_user(topic, passages, part)
+        sub = passages_for_part(part, passages)   # 권고안 B: part 전용 passage
+        usrp = _part_user(topic, sub, part)
         print(f"[free:{part}] generating {topic.topic_id} "
-              f"(max_tokens={_PART_MAX.get(part, 8000)})...", flush=True)
+              f"(passages {len(passages)}→{len(sub)}, "
+              f"max_tokens={_PART_MAX.get(part, 8000)})...", flush=True)
         try:
             res = llm.complete(system=sysp, user=usrp,
                                max_tokens=_PART_MAX.get(part, 8000),
@@ -287,20 +289,20 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
     return str(combined)
 
 
-# ---- 입력 컨텍스트 풍부화(패킹) ---------------------------------------------
-# 강 모델의 입력 컨텍스트(다만 총 ctx 32768)를 되도록 채워 출처 기반 grounding 을
-# 극대화한다. passages 는 이미 관련성 우선(primary 섹션 → crossref) 순이므로,
-# 예산 이내에서 "처음부터" 토큰을 채우며 남겨둔다.
-MAX_INPUT = 32768      # 입력 창 최대(독립)
-HARD_CTX = MAX_INPUT    # (레거시 호칭 유지)
-_SCAFFOLD_EST = 1024    # 시스템+토픽 헤더 등 passage 외 오버헤드 근사
-# passage 로 입력 창을 가급적 꽉 채움(스캐폴드만 제외). env 로 덮어쓸 수 있다.
-DEFAULT_INPUT_TOKENS = MAX_INPUT - _SCAFFOLD_EST
+# ---- 입력 컨텍스트 균형(CPU 백엔드용) ------------------------------------
+# 총 ctx = 16384(804를 8081 llama-server). CPU(9700X) 는 프롬프트가 ~4k 를
+# 넘기며 O(n^2) 어텐션이 비선형 폭주하므로, passage 예산 기본을 ~4096 으로 잡는다.
+# env LOCAL_FREE_INPUT_TOKENS 로 상향 조정 가능(그러나 ctx 여유 초과 주의).
+MAX_INPUT = 16384      # 총 컨텍스트 (llama-server --ctx-size)
+HARD_CTX = MAX_INPUT
+_SCAFFOLD_EST = 640    # 시스템+토픽 헤더 등 passage 외 고정 오버헤드 근사
+DEFAULT_INPUT_TOKENS = 4096   # CPU 백엔드 실용 입력 한도
+
 
 
 def input_budget() -> int:
-    """입력 passage 에만 쓸 토큰 예산(독립 입력 창). env LOCAL_FREE_INPUT_TOKENS 로
-    조정, 상한 ≈ MAX_INPUT - _SCAFFOLD_EST (출력은 별도 창이라 여유 불필요)."""
+    """입력 passage 에만 쓸 토큰 예산(권고안 A). env LOCAL_FREE_INPUT_TOKENS 로 조정.
+    상한 ≈ MAX_INPUT - _SCAFFOLD_EST(스캐폴드 포함해도 ctx 안쪽)이며 기본은 4096."""
     import os
     try:
         want = int(os.environ.get("LOCAL_FREE_INPUT_TOKENS",
@@ -340,4 +342,54 @@ def pack_passages(passages, max_tokens: int | None = None,
         packed.append(p)
         used += n
     return packed
+
+
+# ---- 부분별 passage 전문화(권고안 B) ---------------------------------------
+# 세 부분이 같은 passages 전체를 그대로 반복해 보내지 않도록, 각 part 에 어울리는
+# passage 를 우선 뽑아 그 부분에만 쓴다(전체 예산보다 작게). passage 텍스트에
+# 예/연습/정의 등의 표식이 있으면 그 표식에 맞는 조각을 높은 우선순위로 선택하고,
+# 부족하면 앞쪽(primary) passage 로 채워 grounding 을 유지한다.
+_PART_KEYWORDS = {
+    "concept": ["definition", "define", "theorem", "정의", "정리", "introduction",
+                "continuous", "increasing", "decreasing", "property"],
+    "examples": ["example", "sample", "solution", "예제", "예 ", "worked"],
+    "practice": ["exercise", "problem", "practice", "연습", "문제", "#7", "#24"],
+}
+_DEFAULT_PART_TOKENS = 2048    # 각 part 의 passage 예산 (권고안 B)
+
+
+def _part_score(part: str, text: str) -> int:
+    low = text.lower()
+    return sum(low.count(k.lower()) for k in _PART_KEYWORDS.get(part, []))
+
+
+def part_token_cap() -> int:
+    """각 part 의 passage 예산(기본 2048, env LOCAL_FREE_PART_TOKENS 로 조정). 전역
+    input_budget() 을 초과하지 않도록 상한도 함께 적용한다."""
+    import os
+    try:
+        want = int(os.environ.get("LOCAL_FREE_PART_TOKENS",
+                                  _DEFAULT_PART_TOKENS))
+    except ValueError:
+        want = _DEFAULT_PART_TOKENS
+    return max(256, min(want, input_budget()))
+
+
+def passages_for_part(part: str, passages, *, max_tokens: int | None = None,
+                      count_tokens=None):
+    """part 에 어울리는 passage 부분집합 (예산 내, 최소한의 grounding 유지)."""
+    if not passages:
+        return []
+    if max_tokens is None:
+        max_tokens = part_token_cap()
+    if count_tokens is None:
+        count_tokens = estimate_tokens
+    # 맨 앞 'primary' 일부는 항상 유지 (모든 part 의 공통 근거)
+    core_n = max(1, min(len(passages), max(2, len(passages) // 5)))
+    core = passages[:core_n]
+    # 나머지를 part 키워드 점수에 따라 내림차순 정렬 (동률은 원순서)
+    rest = list(enumerate(passages[core_n:], start=core_n))
+    rest_sorted = sorted(rest, key=lambda it: (-_part_score(part, it[1]), it[0]))
+    ordered = list(core) + [p for _, p in rest_sorted]
+    return pack_passages(ordered, max_tokens, count_tokens=count_tokens)
 
