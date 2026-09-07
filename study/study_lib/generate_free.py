@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 from .llm import LLMError
@@ -201,6 +202,85 @@ _EN_KICK = (
 # 각 부분 최대를 생성 여유 끝(10k~12k)에 맞춘다.
 _PART_MAX = {"concept": 6000, "examples": 12000, "practice": 14000}
 
+# --- 개수·난이도 목록형 부분을 '여러 요청'으로 쪼개 누적 생성 ---
+# 단일 요청에서 R1 은 첫 마커 하나 만들고 완결한다(실측). ctx 가 작아 한 번에 N개
+# 전부는 불가 → tier/배치로 쪼개 연속 호출로 누적. 각 part 별 목표 구성:
+#   examples : Basic 5
+#   practice : Basic 10 + Standard 5 + Challenge 5
+_SPEC = {
+    "examples": {
+        "marker": "### Example",
+        "heading": "## Worked examples",
+        "kind": "examples",
+        "tiers": [("Basic", 5)],
+        "counted": (
+            "You produce worked examples for this topic. Each item uses the format "
+            "'### Example N': give **Problem.** then a complete step-by-step "
+            "**Solution.** (name each rule, verify hypotheses) and a final **Answer.**. "
+            "Write only the items the USER message requests.\n"),
+    },
+    "practice": {
+        "marker": "### Problem",
+        "heading": "## Practice problems",
+        "kind": "problems",
+        "tiers": [("Basic", 10), ("Standard", 5), ("Challenge", 5)],
+        "counted": (
+            "You produce practice problems for this topic (built-in full answer key). "
+            "Each item uses '### Problem N'. Give **Problem.** (with difficulty/skill "
+            "tag), a strict '**Work area.**' line, a full step-by-step **Solution.** and "
+            "final **Answer.**. Write ONLY the difficulty tier and count the USER message "
+            "asks for; number them continuously (do not restart numbering).\n"),
+    },
+}
+_LIST_PER_SHOT = 2     # tier 배치당 요청 개수 (ctx 여유 내 완결 위해)
+
+
+def _count_markers(body: str, marker: str) -> int:
+    """body 에서 'marker ' 로 시작하는 마커 개수(제목 번호 항목)."""
+    return max(0, body.count(marker + " ")) if body else 0
+
+
+def _clean_list_chunk(chunk: str, marker: str, heading: str) -> str:
+    """모델이 헤딩/앞 잡음을 반복 출력하면 떼어낸다. 실제 항목 마커까지 남긴다."""
+    c = chunk.strip()
+    lines = c.splitlines()
+    while lines and lines[0].lstrip().startswith("#"):
+        if lines[0].lstrip().startswith(marker):
+            break
+        lines.pop(0)
+    return "\n".join(lines).strip()
+
+
+def _tier_user(topic, sub_passages, spec, tier_label: str, goal: int,
+               start: int) -> str:
+    """목록형 부분의 'tier_label 난이도 goal 개, start 번호부터' 생성용 유저."""
+    src = "\n\n".join(f"[{i}] {p}" for i, p in enumerate(sub_passages, 1))
+    tier_guide = {
+        "Basic": "routine, foundational computation directly on the key formulas.",
+        "Standard": "typical exam-style; combines two techniques or has a small trap.",
+        "Challenge": "harder: a proof, a counterexample, or a multi-step synthesis.",
+    }.get(tier_label, tier_label.lower())
+    return (
+        "TOPIC: {topic}\n"
+        "BOOK: {book}   SECTION: {section}   SUBJECT: {subject}\n\n"
+        "Textbook source passage (consult as needed):\n"
+        "{passages}\n\n"
+        "Produce {goal} '{label}' {kind} numbered {start}..{startp} ('{marker} N'). "
+        "{label} means: {guide}. Continue numbering from {start} (do not restart). "
+        "Output only these items; do not include the '{heading}' heading (it already "
+        "exists).\n"
+        "{counted}"
+    ).format(
+        topic=topic.title or topic.topic_id,
+        book=topic.book_id, section=topic.section or "-",
+        subject=topic.subject, passages=src,
+        goal=goal, label=tier_label,
+        kind="examples" if spec["marker"].startswith("### Example")
+        else "practice problems",
+        start=start, startp=start + goal - 1,
+        marker=spec["marker"], heading=spec["heading"],
+        guide=tier_guide, counted=spec["counted"])
+
 
 def _part_user(topic, passages, part: str) -> str:
     src = "\n\n".join(f"[{i}] {p}" for i, p in enumerate(passages, 1))
@@ -248,6 +328,62 @@ def normalize_math_delims(text: str) -> str:
     return text
 
 
+def _gen_part_body(topic, llm, part, sysp, passages) -> str:
+    """부분의 마크다운 본문('##' 헤딩 포함) 생성.
+
+    - concept/기타: 단일 호출(_part_system 로 full 지시).
+    - examples/practice: tier 구성을 _SPEC 에 따라 난이도별 배치로 쪼개 연속 호출로
+      누적. '## ...' 헤딩은 여기서 한 번만 붙이고, 항목 번호는 tier 를 가로지르며 연속.
+    """
+    spec = _SPEC.get(part)
+    if spec is None:
+        res = llm.complete(system=sysp, user=_part_user(topic, passages, part),
+                           max_tokens=_PART_MAX.get(part, 8000),
+                           json_object=False)
+        raw = res.content if isinstance(res.content, str) else str(res.content)
+        return normalize_math_delims((raw or "").strip())
+
+    marker = spec["marker"]
+    cap = _PART_MAX.get(part, 8000)
+    counted_sys = _STD + "\n" + spec["counted"]
+
+    chunks: list[str] = [spec["heading"]]
+    idx = 0
+    for tier, goal in spec["tiers"]:
+        need = goal
+        stall = 0
+        while need > 0 and stall < 3:
+            req = min(_LIST_PER_SHOT, need)
+            start = idx + 1
+            user = _tier_user(topic, passages, spec, tier, req, start)
+            try:
+                res = llm.complete(system=counted_sys, user=user,
+                                   max_tokens=cap, json_object=False)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[free:{part}] FAILED tier={tier} @{start}: {exc}",
+                      file=sys.stderr, flush=True)
+                stall = 3
+                break
+            raw = res.content if isinstance(res.content, str) else str(res.content)
+            chunk = normalize_math_delims(raw or "").strip()
+            got = _count_markers(chunk, marker)
+            if got == 0:
+                print(f"[free:{part}] tier={tier} @{start} produced 0 items; "
+                      f"stop chunk ({len(chunk)} chars)", file=sys.stderr,
+                      flush=True)
+                stall += 1
+                continue
+            chunks.append(_clean_list_chunk(chunk, marker, spec["heading"]))
+            idx += got
+            need -= got
+            stall = 0
+        # need>0 인 채 나오면 다음 tier 로 넘어가도 되게 경고만
+        if need > 0:
+            print(f"[free:{part}] tier={tier} short by {need} items (got "
+                  f"{goal - need}/{goal})", file=sys.stderr, flush=True)
+    return "\n\n".join(chunks) + "\n"
+
+
 def run_free_parts(topic, llm, passages, notes_dir: str | Path,
                    parts=PART_ORDER, *, return_combined: bool = True) -> str:
     """topic 에 대해 일부(기본 전체) 부분을 생성·저장하고 병합본을 쓴다.
@@ -272,23 +408,16 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
     for part in parts:
         sysp = _part_system(part)
         sub = passages_for_part(part, passages)   # 권고안 B: part 전용 passage
-        usrp = _part_user(topic, sub, part)
         print(f"[free:{part}] generating {topic.topic_id} "
               f"(passages {len(passages)}→{len(sub)}, "
               f"max_tokens={_PART_MAX.get(part, 8000)})...", flush=True)
         try:
-            res = llm.complete(system=sysp, user=usrp,
-                               max_tokens=_PART_MAX.get(part, 8000),
-                               json_object=False)
+            body = _gen_part_body(topic, llm, part, sysp, sub)
         except Exception as exc:  # noqa: BLE001
             print(f"[free:{part}] FAILED {topic.topic_id}: {exc}",
                   file=sys.stderr, flush=True)
             continue
-        body = res.content if isinstance(res.content, str) else str(res.content)
-        body = normalize_math_delims((body or "").strip())
-        # 품질 가드: 우리 part 는 항상 마크다운 섹션 헤딩("## ...")을 요구한다.
-        # 헤딩이 없으면 = R1 이 생각(think)을 content 로 그대로 뱉은 강의식 난독산문일
-        # 가능성이 크므로 저장하지 않고 실패 처리(다음 재시도/재실행에서 다시).
+        # 품질 가드: 헤딩("## ...") 없는 body(= think 누출)는 실패 처리
         if "## " not in body:
             print(f"[free:{part}] REJECTED {topic.topic_id}: body has no "
                   f"'## ' section heading ({len(body)} chars) — looks like "
@@ -299,7 +428,8 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
         pf = Path(base) / f"{topic.topic_id}.{part}.md"
         pf.write_text(_HEADER.format(part=part, **topic_vars) + body + "\n",
                       encoding="utf-8")
-        print(f"[free:{part}] done -> {pf.name} ({len(body)} chars)",
+        print(f"[free:{part}] done -> {pf.name} ({len(body)} chars, "
+              f"{_count_markers(body, _SPEC[part]['marker']) if part in _SPEC else '-'} items)",
               flush=True)
     # 생성하지 않은 나머지 부분: 디스크에 있으면 병합에 재사용
     for part in PART_ORDER:

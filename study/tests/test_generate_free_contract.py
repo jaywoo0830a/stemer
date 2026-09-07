@@ -45,7 +45,7 @@ def test_run_free_sends_json_object_false_and_passages(tmp_path):
 
 
 class _SeqLLM:
-    """호출 순서대로 body 를 돌려주는 더미 (부분별 3회 호출 확인용)."""
+    """호출 순서대로 body 를 돌려주는 더미 (단일-호출 경로 / reject 테스트용)."""
     def __init__(self, bodies):
         self.bodies = list(bodies)
         self.calls = []
@@ -58,23 +58,63 @@ class _SeqLLM:
         return LLMResult(content=body, usage=Usage())
 
 
-def test_run_free_parts_writes_three_files_and_combined(tmp_path):
-    from study_lib.generate_free import run_free_parts, PART_ORDER
-    llm = _SeqLLM(["## Reading the Topic\n\nCONCEPT_BODY",
-                   "## Worked examples\n\nEXAMPLES_BODY",
-                   "## Practice problems\n\nPRACTICE_BODY"])
-    path = run_free_parts(_topic(), llm, ["p1", "p2"], tmp_path)
-    # 3번 호출, 전부 json_object=False
-    assert len(llm.calls) == len(PART_ORDER) == 3
-    assert all(c["json_object"] is False for c in llm.calls)
-    # 각 부분 파일 + 병합본 존재, 병합순서 concept→examples→practice
-    for part in PART_ORDER:
-        assert (tmp_path / f"미적분-11-3.{part}.md").exists()
+import re as _re
+
+
+class _TierLLM:
+    """목록형(examples/practice)을 '요청 개수 만큼 마커'로 채우는 더미.
+
+    concept 요청이면 고정 개념 본문을 반환하고 기록만 남긴다. 목록 요청은
+    user 의 'Produce N ...' 에서 N 을 읽어 그만큼 'marker N' 라인을 돌려줘
+    배치 누적(다회 호출)을 결정적으로 검증한다.
+    """
+    def __init__(self):
+        self.calls = []
+
+    def complete(self, *, system, user, max_tokens, json_object):
+        self.calls.append((json_object, user))
+        from study_lib.llm import LLMResult, Usage
+        low_sys = (system or "").lower()
+        low_user = user or ""
+        if "reading the topic" in low_sys and "worked examples" not in low_sys \
+                and "practice problems" not in low_sys:
+            return LLMResult(content="## Reading the Topic\n\nCONCEPT_BODY",
+                             usage=Usage())
+        # 목록 호출: 난이도 마커 판별
+        if "worked examples" in low_sys:
+            marker = "### Example"
+        else:
+            marker = "### Problem"
+        m = _re.search(r"Produce\s+(\d+)", low_user)
+        n = int(m.group(1)) if m else 2
+        tail = "**Solution.** placeholder under $x^2$." \
+            if marker.startswith("### Example") \
+            else "**Problem.** ...\n\n**Work area.**\n\n**Solution.** $x$."
+        lines = [f"{marker} {i}\n{tail}" for i in range(1, n + 1)]
+        body = "\n\n".join(lines)
+        return LLMResult(content=body, usage=Usage())
+
+
+def test_run_free_parts_list_parts_multi_shot_accumulates(tmp_path):
+    """examples 는 Basic5 · practice 는 Basic10/Standard5/Challenge5 → 다회 호출로
+    누적돼 각 파일에 요구 수만큼 항목이 생긴다."""
+    import study_lib.generate_free as gf
+    llm = _TierLLM()
+    path = gf.run_free_parts(_topic(), llm, ["p1", "p2"], tmp_path)
+    ex = (tmp_path / "미적분-11-3.examples.md").read_text(encoding="utf-8")
+    pr = (tmp_path / "미적분-11-3.practice.md").read_text(encoding="utf-8")
+    # examples Basic 5
+    n_ex = ex.count("### Example ")
+    assert n_ex >= gf._SPEC["examples"]["tiers"][0][1]  # >= 5
+    # practice 합계 10+5+5=20 (다회 호출이 포함: calls 개수는 목록 파트들에서 여러번)
+    n_pr = pr.count("### Problem ")
+    assert n_pr >= gf._SPEC["practice"]["tiers"][0][1] + \
+        gf._SPEC["practice"]["tiers"][1][1] + gf._SPEC["practice"]["tiers"][2][1]
+    assert "## Worked examples" in ex and "## Practice problems" in pr
     combo = (tmp_path / "미적분-11-3.md").read_text(encoding="utf-8")
-    for marker in ("CONCEPT_BODY", "EXAMPLES_BODY", "PRACTICE_BODY"):
-        assert marker in combo
-    assert combo.index("CONCEPT_BODY") < combo.index("EXAMPLES_BODY") < \
-        combo.index("PRACTICE_BODY")
+    # concept 먼저, examples 중간, practice 마지막
+    assert combo.index("CONCEPT_BODY") < combo.index("## Worked examples") < \
+        combo.index("## Practice problems")
     assert str(path) == str(tmp_path / "미적분-11-3.md")
 
 
@@ -82,17 +122,14 @@ def test_run_free_parts_partial_reuses_existing_parts(tmp_path):
     """examples 만 재생성해도 기존 concept/practice 파일을 병합에 재사용."""
     from study_lib.generate_free import run_free_parts
     # 먼저 전체 생성
-    llm1 = _SeqLLM(["## Reading the Topic\n\nC1", "## Worked examples\n\nE1",
-                    "## Practice problems\n\nP1"])
+    llm1 = _TierLLM()
     run_free_parts(_topic(), llm1, ["p"], tmp_path)
-    # 이번엔 examples 만
-    llm2 = _SeqLLM(["## Worked examples\n\nE2_NEW"])
+    # 이번엔 examples 만 (concept/practice 는 디스크 재사용)
+    llm2 = _TierLLM()
     run_free_parts(_topic(), llm2, ["p"], tmp_path, parts=["examples"])
-    assert llm2.calls and [(c.get("max_tokens")) for c in llm2.calls]
-    assert len(llm2.calls) == 1
     combo = (tmp_path / "미적분-11-3.md").read_text(encoding="utf-8")
-    assert "E2_NEW" in combo          # 새 예제 반영
-    assert "C1" in combo and "P1" in combo   # 기존 개념/연습 보존
+    assert "## Worked examples" in combo          # 새 예제 및 갱신 병합
+    assert "CONCEPT_BODY" in combo and "### Problem " in combo  # 기존 유지
 
 
 def test_run_free_parts_rejects_reasoning_leak_without_heading(tmp_path):
