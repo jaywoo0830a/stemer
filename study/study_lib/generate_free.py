@@ -33,43 +33,75 @@ import os
 _LANG = {
     "en": {
         "system": (
-            "You are a patient math/sciences tutor writing concise study notes for one topic.\n"
-            "RULES:\n"
-            "- Write in English, human-readable prose that builds understanding (not a rigid "
-            "box list): start from what the idea answers, then definitions+why, key formulas, "
-            "common mistake, then WORKED EXAMPLE(S) and PRACTICE problems -- grounded in the "
-            "given textbook passages (cite source like (textbook EXAMPLE 3) or (11.3 Exercises #7)).\n"
-            "- Markdown only. Wrap every math expression in $...$; one short symbol inline, "
-            "do not leave bare math outside $."
+            "You are an expert math tutor writing a self-contained study note for ONE topic.\n"
+            "The note must actually TEACH: a reader should be able to redo every step.\n\n"
+            "STRUCTURE (in this order):\n"
+            "1. ## Reading the Topic -- a flowing, readable explanation: what the idea is for, "
+            "   the intuition, definitions, why each key formula holds, and the one common mistake "
+            "   students make. Ground it in the textbook passages.\n"
+            "2. ## Worked examples -- provide AT LEAST 3, preferably 4-5, of increasing difficulty:\n"
+            "   one basic/template case, one typical exam-style case, and one application/word "
+            "   problem (create a plausible extension if the passage has no word problem). "
+            "   For EACH example include the FULL step-by-step solution headed **Solution.**: "
+            "   explain each algebraic/calculus move line by line (what rule is applied and why), "
+            "   not just the final answer. State the conclusion explicitly.\n"
+            "3. ## Practice problems -- provide AT LEAST 5, ordered by rising difficulty, then "
+            "   right below each give a fully worked **Solution**: (steps + final answer, as a "
+            "   built-in answer key). Do not leave problems unresolved.\n\n"
+            "QUALITY RULES:\n"
+            "- Be mathematically correct. Never state a false step; if a step relies on a theorem, "
+            "   say so (e.g. 'f is continuous/positive/decreasing on [1,oo), so Integral Test applies').\n"
+            "- Cite the textbook source inline like (textbook EXAMPLE 3) or (11.3 Exercises #7); "
+            "   create a labelled extension only when the passage lacks the needed item.\n"
+            "- Markdown only. Wrap every math expression in $...$ (display: $$...$$). One short "
+            "   symbol inline, never leave bare math outside $."
         ),
         "user": (
             "TOPIC: {topic}\n"
             "BOOK: {book}   SECTION: {section}   SUBJECT: {subject}\n\n"
             "Textbook source passage (consult as needed):\n"
             "{passages}\n\n"
-            "Write the study note for this topic (markdown body only, no YAML header)."
+            "Write this topic's study note in English now (markdown body only, no YAML header). "
+            "Keep the Reading concise but make the WORKED EXAMPLES (>=3) and PRACTICE with full "
+            "solutions (>=5) the strongest part. Do not truncate -- finish every solution."
         ),
         "cite": "textbook EXAMPLE 3",
     },
     "ko": {
         "system": (
-            "You are a patient math/sciences tutor writing concise study notes for one topic.\n"
-            "RULES:\n"
-            "- Write in Korean, human-readable prose that builds understanding (not a rigid "
-            "box list): start from what the idea answers, then definitions+why, key formulas, "
-            "common mistake, then WORKED EXAMPLE(S) and PRACTICE problems -- grounded in the "
-            "given textbook passages (cite source like (교재 EXAMPLE 3) or (11.3 Exercises #7)).\n"
-            "- Markdown only. Wrap every math expression in $...$; one short symbol inline, "
-            "do not leave bare math outside $."
+            "You are an expert math tutor writing a self-contained study note for ONE topic.\n"
+            "The note must actually TEACH: a reader should be able to redo every step.\n\n"
+            "STRUCTURE (in this order):\n"
+            "1. ## Reading the Topic -- a flowing, readable explanation: what the idea is for, "
+            "   the intuition, definitions, why each key formula holds, and the one common mistake "
+            "   students make. Ground it in the textbook passages.\n"
+            "2. ## Worked examples -- provide AT LEAST 3, preferably 4-5, of increasing difficulty:\n"
+            "   one basic/template case, one typical exam-style case, and one application/word "
+            "   problem (create a plausible extension if the passage has no word problem). "
+            "   For EACH example include the FULL step-by-step solution headed **Solution.**: "
+            "   explain each algebraic/calculus move line by line (what rule is applied and why), "
+            "   not just the final answer. State the conclusion explicitly.\n"
+            "3. ## Practice problems -- provide AT LEAST 5, ordered by rising difficulty, then "
+            "   right below each give a fully worked **Solution**: (steps + final answer, as a "
+            "   built-in answer key). Do not leave problems unresolved.\n\n"
+            "QUALITY RULES:\n"
+            "- Be mathematically correct. Never state a false step; if a step relies on a theorem, "
+            "   say so (e.g. 'f is continuous/positive/decreasing on [1,oo), so Integral Test applies').\n"
+            "- Cite the textbook source inline like (textbook EXAMPLE 3) or (11.3 Exercises #7); "
+            "   create a labelled extension only when the passage lacks the needed item.\n"
+            "- Markdown only. Wrap every math expression in $...$ (display: $$...$$). One short "
+            "   symbol inline, never leave bare math outside $."
         ),
         "user": (
             "TOPIC: {topic}\n"
             "BOOK: {book}   SECTION: {section}   SUBJECT: {subject}\n\n"
-            "교재 출처 passage (필요한 만큼 참고):\n"
+            "Textbook source passage (consult as needed):\n"
             "{passages}\n\n"
-            "위 토픽의 학습자료(markdown 본문만, header 없이)를 작성하라."
+            "Write this topic's study note, presenting the body text in Korean. "
+            "Keep Reading concise but make WORKED EXAMPLES (>=3) and PRACTICE with full "
+            "solutions (>=5) the strongest part. Do not truncate -- finish every solution."
         ),
-        "cite": "교재 EXAMPLE 3",
+        "cite": "textbook EXAMPLE 3",
     },
 }
 
