@@ -189,10 +189,11 @@ _EN_KICK = (
     "finish every example and every solution completely before stopping."
 )
 
-# 각 부분의 최대 생성 토큰(권고안 C: ctx 16384 내 생성 여유에 맞춰 하향).
-# 프롬프트(≤~4k)/R1 reasoning 을 빼면 실질 마진은 이보다 작다. ctx 초과를 요청하면
-# llama-server 가 생성이 아니라 응답 단계에서 정리(빈/조기중단)되므로 과설정은 손해.
-_PART_MAX = {"concept": 6000, "examples": 8000, "practice": 10000}
+# 각 부분의 최대 생성 토큰. ctx 16384 · prompt ≤~4096 인 채 남는 생성 여유 ≈ ~12k.
+# R1 이 reasoning 을 먼저 쓰므로 content 만 뽑으면 실제는 더 짧다. 그래서 요청 상한을
+# 가능한 '풍부'로 두되(concept/examples/practice 각각 독립 요청) ctx 를 넘기지는 않게:
+# 각 부분 최대를 생성 여유 끝(10k~12k)에 맞춘다.
+_PART_MAX = {"concept": 6000, "examples": 12000, "practice": 14000}
 
 
 def _part_user(topic, passages, part: str) -> str:
