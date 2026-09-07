@@ -47,12 +47,12 @@ class LocalClient:
     def _chat(self, system: str, user: str, max_tokens: int) -> str:
         import httpx  # 선택 의존성 (DeepSeek 경로와 동일)
 
-        # llama-server(8081, Qwen)는 표준 OpenAI 문자열 content 를 원한다.
+        def msg(role: str, text: str) -> dict:
+            # llama.cpp(8081)이 이번 실측에서 성공한 형태: content 배열 + type
+            return {"role": role, "content": [{"type": "text", "text": text}]}
+
         body = {
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            "messages": [msg("system", system), msg("user", user)],
             "temperature": 0.0,
             "max_tokens": max_tokens,
             "stream": False,
