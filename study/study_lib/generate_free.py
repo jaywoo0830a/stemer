@@ -189,7 +189,9 @@ _EN_KICK = (
 )
 
 # 각 부분의 최대 생성 토큰. 세 부분 합계 ≈ 4k+7k+8k 토큰(강 모델·정성용).
-_PART_MAX = {"concept": 4000, "examples": 7000, "practice": 8000}
+# 각 부분의 최대 생성 토큰(출력 창이 독립이라 넉넉히). 단일 요청의 max_tokens 는
+# 추론+답(content) 을 함께 자르므로 충분히 여유를 둔다.
+_PART_MAX = {"concept": 8000, "examples": 18000, "practice": 20000}
 
 
 def _part_user(topic, passages, part: str) -> str:
@@ -265,22 +267,23 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
 # 강 모델의 입력 컨텍스트(다만 총 ctx 32768)를 되도록 채워 출처 기반 grounding 을
 # 극대화한다. passages 는 이미 관련성 우선(primary 섹션 → crossref) 순이므로,
 # 예산 이내에서 "처음부터" 토큰을 채우며 남겨둔다.
-DEFAULT_INPUT_TOKENS = 24000          # ~24k 프로비전 + 출력/추론 예비(~8k)
-HARD_CTX = 32768
-_KEEP_OUTPUT = 8192                   # 추론+답에 남길 최소 컨텍스트
-_SCAFFOLD_EST = 1600                  # 시스템+토픽 헤더 등 passage 외 고정 오버헤드 추정
+MAX_INPUT = 32768      # 입력 창 최대(독립)
+HARD_CTX = MAX_INPUT    # (레거시 호칭 유지)
+_SCAFFOLD_EST = 1024    # 시스템+토픽 헤더 등 passage 외 오버헤드 근사
+# passage 로 입력 창을 가급적 꽉 채움(스캐폴드만 제외). env 로 덮어쓸 수 있다.
+DEFAULT_INPUT_TOKENS = MAX_INPUT - _SCAFFOLD_EST
 
 
 def input_budget() -> int:
-    """passage 본문에만 쓸 입력 토큰 예산. env LOCAL_FREE_INPUT_TOKENS 로 조정.
-    상한 = HARD_CTX - _KEEP_OUTPUT - _SCAFFOLD_EST(스캐폴드 포함해도 출력 예비 보장)."""
+    """입력 passage 에만 쓸 토큰 예산(독립 입력 창). env LOCAL_FREE_INPUT_TOKENS 로
+    조정, 상한 ≈ MAX_INPUT - _SCAFFOLD_EST (출력은 별도 창이라 여유 불필요)."""
     import os
     try:
         want = int(os.environ.get("LOCAL_FREE_INPUT_TOKENS",
                                   DEFAULT_INPUT_TOKENS))
     except ValueError:
         want = DEFAULT_INPUT_TOKENS
-    cap = HARD_CTX - _KEEP_OUTPUT - _SCAFFOLD_EST
+    cap = MAX_INPUT - _SCAFFOLD_EST
     return max(1000, min(want, cap))
 
 

@@ -102,8 +102,10 @@ def test_pack_passages_respects_budget_keeps_prefix_order():
     assert packed == ps[:4]
 
 
-def test_input_budget_caps_below_ctx_output_reserve():
+def test_input_budget_fills_independent_input_window():
     import study_lib.generate_free as g
     b = g.input_budget()
-    assert b <= g.HARD_CTX - g._KEEP_OUTPUT - g._SCAFFOLD_EST
+    # 독립 입력 창(32768)을 스캐폴드 정도만 제외하고 최대한 채운다.
+    assert b <= g.MAX_INPUT - g._SCAFFOLD_EST
+    assert b >= g.MAX_INPUT - g._SCAFFOLD_EST  # 기본값이 cap 을 채움
     assert b >= 1000
