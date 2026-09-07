@@ -217,14 +217,19 @@ def _build_docling_converter():
                                device=AcceleratorDevice.CPU)
     opts = PdfPipelineOptions()
     opts.accelerator_options = accel
+    do_formulas = os.environ.get("DOCLING_FORMULAS", "0") == "1"
     # 기본값: 텍스트 레이어 PDF 기준 (스캔본은 DOCLING_OCR=1)
     opts.do_ocr = os.environ.get("DOCLING_OCR", "0") == "1"
     opts.do_table_structure = os.environ.get("DOCLING_TABLES", "1") != "0"
-    opts.do_formula_enrichment = False
+    # 수식 디코딩: formula-not-decoded 마커를 LaTeX(or 유니코드)로 채운다.
+    # codeformulav2 VLM 이 수식 이미지를 읽어 처리 — CPU라 매우 느리고
+    # 모델 다운로드(수 GB)가 필요하다. 항상 켜두지 말고 DOCLING_FORMULAS=1.
+    opts.do_formula_enrichment = do_formulas
     opts.do_code_enrichment = False
     opts.images_scale = 1.0
-    opts.generate_page_images = False
-    opts.generate_picture_images = False
+    # 수식 VLM 은 수식 crop(이미지)이 필요하다 → 페이지/그림 렌더를 켜야 한다
+    opts.generate_page_images = do_formulas
+    opts.generate_picture_images = do_formulas
     # 테이블: 정확도보다 속도 (복잡 테이블은 DOCLING_TABLES_ACCURATE=1)
     try:
         if os.environ.get("DOCLING_TABLES_ACCURATE", "0") != "1":
@@ -251,6 +256,8 @@ class DoclingParser:
       DOCLING_OCR=1            스캔본 OCR 활성화 (기본 off)
       DOCLING_TABLES=0         테이블 구조 추출 비활성 (속도)
       DOCLING_TABLES_ACCURATE=1  TableFormer 정확도 모드 (기본 fast)
+      DOCLING_FORMULAS=1       수식 디코딩(codeformula VLM) — formula-not-decoded
+                               를 LaTeX 로 채움. 매우 느림 + 수 GB 모델 다운로드 필요.
     """
     name = "docling"
 
