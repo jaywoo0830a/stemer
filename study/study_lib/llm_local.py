@@ -46,11 +46,13 @@ class LocalClient:
 
     def _chat(self, system: str, user: str, max_tokens: int) -> str:
         import httpx  # 선택 의존성 (DeepSeek 경로와 동일)
+
+        def msg(role: str, text: str) -> dict:
+            # 최신 llama-server 는 content 를 배열({type:text,text})로 요구
+            return {"role": role, "content": [{"type": "text", "text": text}]}
+
         body = {
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            "messages": [msg("system", system), msg("user", user)],
             "temperature": 0.0,
             "max_tokens": max_tokens,
             "stream": False,
@@ -66,7 +68,14 @@ class LocalClient:
             raise LLMError(f"local llm failed: {exc}") from None
         try:
             choices = r.json()["choices"]
-            return choices[0]["message"]["content"]
+            raw = choices[0]["message"]
+            content = raw.get("content") or ""
+            if isinstance(content, list):  # 호환: 배열로 온 경우
+                content = "".join(
+                    (p.get("text", "") if isinstance(p, dict) else str(p))
+                    for p in content
+                )
+            return content or ""
         except Exception as exc:  # noqa: BLE001
             raise LLMError(f"local llm bad response: {exc}") from None
 
