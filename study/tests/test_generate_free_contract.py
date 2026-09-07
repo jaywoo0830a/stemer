@@ -42,3 +42,51 @@ def test_run_free_sends_json_object_false_and_passages(tmp_path):
     assert flag is False
     assert "Integral Test def passage" not in user or True
     assert "[1]" in user and "[2]" in user  # passage 번호 포함
+
+
+class _SeqLLM:
+    """호출 순서대로 body 를 돌려주는 더미 (부분별 3회 호출 확인용)."""
+    def __init__(self, bodies):
+        self.bodies = list(bodies)
+        self.calls = []
+
+    def complete(self, *, system, user, max_tokens, json_object):
+        self.calls.append({"system": system, "user": user,
+                           "max_tokens": max_tokens, "json_object": json_object})
+        from study_lib.llm import LLMResult, Usage
+        body = self.bodies.pop(0) if self.bodies else ""
+        return LLMResult(content=body, usage=Usage())
+
+
+def test_run_free_parts_writes_three_files_and_combined(tmp_path):
+    from study_lib.generate_free import run_free_parts, PART_ORDER
+    llm = _SeqLLM(["CONCEPT_BODY", "EXAMPLES_BODY", "PRACTICE_BODY"])
+    path = run_free_parts(_topic(), llm, ["p1", "p2"], tmp_path)
+    # 3번 호출, 전부 json_object=False
+    assert len(llm.calls) == len(PART_ORDER) == 3
+    assert all(c["json_object"] is False for c in llm.calls)
+    # 각 부분 파일 + 병합본 존재, 병합순서 concept→examples→practice
+    for part in PART_ORDER:
+        assert (tmp_path / f"미적분-11-3.{part}.md").exists()
+    combo = (tmp_path / "미적분-11-3.md").read_text(encoding="utf-8")
+    for marker in ("CONCEPT_BODY", "EXAMPLES_BODY", "PRACTICE_BODY"):
+        assert marker in combo
+    assert combo.index("CONCEPT_BODY") < combo.index("EXAMPLES_BODY") < \
+        combo.index("PRACTICE_BODY")
+    assert str(path) == str(tmp_path / "미적분-11-3.md")
+
+
+def test_run_free_parts_partial_reuses_existing_parts(tmp_path):
+    """examples 만 재생성해도 기존 concept/practice 파일을 병합에 재사용."""
+    from study_lib.generate_free import run_free_parts
+    # 먼저 전체 생성
+    llm1 = _SeqLLM(["C1", "E1", "P1"])
+    run_free_parts(_topic(), llm1, ["p"], tmp_path)
+    # 이번엔 examples 만
+    llm2 = _SeqLLM(["E2_NEW"])
+    run_free_parts(_topic(), llm2, ["p"], tmp_path, parts=["examples"])
+    assert llm2.calls and [(c.get("max_tokens")) for c in llm2.calls]
+    assert len(llm2.calls) == 1
+    combo = (tmp_path / "미적분-11-3.md").read_text(encoding="utf-8")
+    assert "E2_NEW" in combo          # 새 예제 반영
+    assert "C1" in combo and "P1" in combo   # 기존 개념/연습 보존

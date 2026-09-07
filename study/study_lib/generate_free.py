@@ -141,3 +141,176 @@ def run_free_one(topic, llm, passages, notes_dir: str | Path) -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(front + (body or "").strip() + "\n", encoding="utf-8")
     return str(p)
+
+
+# ---- 부분(개념 / 예제 / 연습·풀이) 분할 생성 --------------------------------
+# 단일 슬롯 llama-server 를 순차로 돌며, 커다란 한 파일이 토큰 한도(16000)에서
+# 잘리는 것을 피한다. 각 부분을 자기 파일로 저장 후 병합된 notes/<topic>.md 를 만든다.
+_HEADER = (
+    "---\n"
+    "title: {title}\n"
+    "subject: {subject}\n"
+    "book: {book}\n"
+    "section: {section}\n"
+    "part: {part}\n"
+    "generator: local-free\n"
+    "---\n\n"
+)
+
+# PART_ORDER 순서로 병합한다.
+PART_ORDER = ("concept", "examples", "practice")
+
+# 각 언어·부분별 분리 프롬프트. system 은 해당 부분 "만" 쓰게 하고,
+# user 끝맺음은 언어 글쓰기 지시가 담긴다(아래 LANGUAGE_KICK).
+_PARTS = {
+    "en": {
+        "concept": (
+            "You are an expert math tutor. Write ONLY the concept/lecture part of a study "
+            "note for ONE topic -- a flowing, readable explanation section titled "
+            "'## Reading the Topic.'\n"
+            "Cover: what the idea is for, the intuition, precise definitions, why each key "
+            "formula holds (derive or motivate it), and ONE common student mistake to avoid. "
+            "Ground everything in the given textbook passages and cite inline like "
+            "(textbook EXAMPLE 3) or (11.3 Exercises #7).\n"
+            "Math in $...$ / $$...$$. Do NOT include examples, practice problems, or solutions "
+            "here -- that is a separate part."
+        ),
+        "examples": (
+            "You are an expert math tutor. Write ONLY the worked-examples part of a study note "
+            "for ONE topic, titled '## Worked examples.'\n"
+            "Give AT LEAST 3, preferably 4-5, examples of rising difficulty: a basic/template "
+            "case, a typical exam-style case, and an application/word problem (invent a "
+            "plausible labelled extension only if the passage lacks one).\n"
+            "For EACH example give the FULL step-by-step **Solution.:** explain every "
+            "algebraic/calculus move line by line (which rule and why), not just the final "
+            "answer, and state the conclusion. Reference the textbook source inline when it "
+            "matches. Math in $...$ / $$...$$."
+        ),
+        "practice": (
+            "You are an expert math tutor. Write ONLY the practice-problems part of a study "
+            "note for ONE topic, titled '## Practice problems.'\n"
+            "Give AT LEAST 5 problems ordered by rising difficulty, spanning the key formula "
+            "uses for this topic. Right after each problem give a FULLY WORKED **Solution.:** "
+            "with all steps and the final answer (built-in answer key). Never leave a problem "
+            "without its solved answer. Where a problem matches the textbook, cite like "
+            "(11.3 Exercises #7). Math in $...$ / $$...$$."
+        ),
+    },
+    "ko": {
+        "concept": (
+            "You are an expert math tutor. Write ONLY the concept/lecture part of a study note "
+            "for ONE topic -- a flowing, readable explanation section titled "
+            "'## Reading the Topic.'\n"
+            "Cover: what the idea is for, the intuition, precise definitions, why each key "
+            "formula holds (derive or motivate it), and ONE common student mistake to avoid. "
+            "Ground everything in the given textbook passages and cite inline like "
+            "(textbook EXAMPLE 3) or (11.3 Exercises #7).\n"
+            "Math in $...$ / $$...$$. Do NOT include examples, practice problems, or solutions "
+            "here -- that is a separate part."
+        ),
+        "examples": (
+            "You are an expert math tutor. Write ONLY the worked-examples part of a study note "
+            "for ONE topic, titled '## Worked examples.'\n"
+            "Give AT LEAST 3, preferably 4-5, examples of rising difficulty: a basic/template "
+            "case, a typical exam-style case, and an application/word problem (invent a "
+            "plausible labelled extension only if the passage lacks one).\n"
+            "For EACH example give the FULL step-by-step **Solution.:** explain every "
+            "algebraic/calculus move line by line (which rule and why), not just the final "
+            "answer, and state the conclusion. Reference the textbook source inline when it "
+            "matches. Math in $...$ / $$...$$."
+        ),
+        "practice": (
+            "You are an expert math tutor. Write ONLY the practice-problems part of a study "
+            "note for ONE topic, titled '## Practice problems.'\n"
+            "Give AT LEAST 5 problems ordered by rising difficulty, spanning the key formula "
+            "uses for this topic. Right after each problem give a FULLY WORKED **Solution.:** "
+            "with all steps and the final answer (built-in answer key). Never leave a problem "
+            "without its solved answer. Where a problem matches the textbook, cite like "
+            "(11.3 Exercises #7). Math in $...$ / $$...$$."
+        ),
+    },
+}
+
+# 유저 프롬프트 언어 지시 (en/ko  글꼴): 본문/해설만 해당 언어로.
+_LANGUAGE_KICK = {
+    "en": (
+        "Write the study note, presenting all prose and solutions in English. "
+        "Finish every example/problem completely -- do not truncate.\n"
+        "Output exactly the requested part as markdown body only (no YAML header)."
+    ),
+    "ko": (
+        "Write the study note, presenting all prose and solutions in Korean "
+        "(math stays as symbols/LaTeX). Finish every example/problem completely -- "
+        "do not truncate.\n"
+        "Output exactly the requested part as markdown body only (no YAML header)."
+    ),
+}
+
+# 각 부분의 최대 생성 토큰 (개념은 짧게, 연습·풀이는 길게).
+_PART_MAX = {"concept": 5000, "examples": 12000, "practice": 16000}
+
+
+def _part_user(topic, passages, lang: str, part: str) -> str:
+    src = "\n\n".join(f"[{i}] {p}" for i, p in enumerate(passages, 1))
+    return (
+        "TOPIC: {topic}\n"
+        "BOOK: {book}   SECTION: {section}   SUBJECT: {subject}\n\n"
+        "Textbook source passage (consult as needed):\n"
+        "{passages}\n\n"
+        "{kick}"
+    ).format(
+        topic=topic.title or topic.topic_id,
+        book=topic.book_id, section=topic.section or "-",
+        subject=topic.subject, passages=src, kick=_LANGUAGE_KICK[lang])
+
+
+def _read_part_file(base: Path, topic_id: str, part: str) -> str | None:
+    pf = base / f"{topic_id}.{part}.md"
+    try:
+        txt = pf.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    return txt.split("---\n\n", 2)[-1].rstrip()  # front matter 뒤 본문
+
+
+def run_free_parts(topic, llm, passages, notes_dir: str | Path,
+                   parts=PART_ORDER, *, return_combined: bool = True) -> str:
+    """topic 에 대해 일부(기본 전체) 부분을 생성·저장하고 병합본을 쓴다.
+
+    parts 에 없는 나머지 부분은 이미 디스크에 있는 <topic>.<part>.md 본문을
+    재사용해 병합에 포함한다(있을 때만). 단일 슬롯 llama-server 를 순차 사용.
+    병합본 notes/<topic>.md 경로를 반환한다.
+    """
+    lang = _free_lang()
+    topic_vars = dict(title=topic.title or topic.topic_id, subject=topic.subject,
+                      book=topic.book_id, section=topic.section or "-")
+    base = Path(notes_dir)
+    base.mkdir(parents=True, exist_ok=True)
+
+    part_bodies: dict[str, str] = {}
+    # 새로 생성할 부분
+    for part in parts:
+        sysp = _PARTS[lang][part]
+        usrp = _part_user(topic, passages, lang, part)
+        res = llm.complete(system=sysp, user=usrp,
+                           max_tokens=_PART_MAX.get(part, 8000),
+                           json_object=False)
+        body = res.content if isinstance(res.content, str) else str(res.content)
+        body = (body or "").strip()
+        part_bodies[part] = body
+        pf = Path(base) / f"{topic.topic_id}.{part}.md"
+        pf.write_text(_HEADER.format(part=part, **topic_vars) + body + "\n",
+                      encoding="utf-8")
+    # 생성하지 않은 나머지 부분: 디스크에 있으면 병합에 재사용
+    for part in PART_ORDER:
+        if part not in part_bodies:
+            existing = _read_part_file(base, topic.topic_id, part)
+            if existing:
+                part_bodies[part] = existing
+
+    combined = (base / f"{topic.topic_id}.md")
+    body_chunks = [part_bodies[p] for p in PART_ORDER if part_bodies.get(p)]
+    combined.write_text(_FRONT.format(**topic_vars) + "\n\n".join(body_chunks)
+                        + "\n", encoding="utf-8")
+    return str(combined)
+

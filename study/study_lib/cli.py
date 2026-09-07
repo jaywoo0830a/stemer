@@ -448,9 +448,15 @@ def _load_guide(path: str | None, subject: str) -> str:
 
 
 def _generate_free(ws: Workspace, args) -> int:
-    """LOCAL_LLM_FREE=1 — 로컬 LLM 이 스키마 없이 `.md` 학습자료를 곧장 씀."""
-    from .generate_free import run_free_one
+    """LOCAL_LLM_FREE=1 — 로컬 LLM 이 스키마 없이 `.md` 학습자료를 곧장 씀.
+
+    부분 분할(run_free_parts): 개념/예제/연습·풀이를 각자 생성(단일 슬롯 순차),
+    개별 `<topic>.<part>.md` + 병합 `<topic>.md` 를 쓴다. 그래서 16000 토큰 한도에
+    한 번에 다 담다 잘리지 않는다.
+    """
+    from .generate_free import PART_ORDER, run_free_parts
     from .llm_local import LocalClient
+    parts = list(args.part) if getattr(args, "part", None) else list(PART_ORDER)
     lib = ws.library()
     if args.topic:
         topics = [lib.topic(args.topic)]
@@ -469,7 +475,7 @@ def _generate_free(ws: Workspace, args) -> int:
     embedder = _resolve_embedder(args.embedder)
     llm = LocalClient()          # 로컬 llama-server (LOCAL_LLM_BASE)
     print(f"[generate-free] model-base={llm.base_url} topics={len(topics)} "
-          f"(스키마 무시·직접 markdown)")
+          f"parts={parts} (부분 분할·직접 markdown)")
     done = failed = 0
     for topic in topics:
         ctx = retrieve(topic, store=store, embedder=embedder)
@@ -480,11 +486,11 @@ def _generate_free(ws: Workspace, args) -> int:
             failed += 1
             continue
         try:
-            note = run_free_one(topic, llm, passages, ws.notes)
+            note = run_free_parts(topic, llm, passages, ws.notes, parts=parts)
             lib.set_status(topic.topic_id, DRAFT, note_path=note)
             lib.save()
             done += 1
-            print(f"draft {topic.topic_id} -> {note}")
+            print(f"draft {topic.topic_id} -> {note} (+각 part 파일)")
         except Exception as exc:  # noqa: BLE001
             failed += 1
             print(f"failed {topic.topic_id}: {exc}", file=sys.stderr)
@@ -676,6 +682,10 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--limit", type=int,
                      help="todo 토픽 중 앞에서 N개만 생성 (검증용)")
     gen.add_argument("--guide")
+    gen.add_argument("--part", action="append", choices=["concept", "examples",
+                     "practice"],
+                     help="LOCAL_LLM_FREE: 생성할 부분만 반복지정 "
+                          "(미지정=전체). 예) --part examples --part practice")
     gen.set_defaults(func=_generate)
     return parser
 
