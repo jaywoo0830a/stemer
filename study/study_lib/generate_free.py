@@ -35,7 +35,7 @@ SYSTEM = (
     "common mistake, then WORKED EXAMPLE(S) and PRACTICE problems -- grounded in the "
     "given textbook passages (cite source like (교재 EXAMPLE 3) or (11.3 Exercises #7)).\n"
     "- Markdown only. Wrap every math expression in $...$; one short symbol inline, "
-    "do not leave bare math outside $.",
+    "do not leave bare math outside $."
 )
 
 USER_TPL = (
