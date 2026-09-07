@@ -45,11 +45,19 @@ def test_parse_json_raises_on_empty_or_nonobject():
         _parse_json("[1,2]")          # dict 아님
 
 
-def test_local_client_complete_returns_dict():
+def test_local_client_complete_returns_dict(monkeypatch):
     c = LocalClient()
-    c._ollama = _FakeOllama('{"cs":[{"c":"X"}]}')
+    monkeypatch.setattr(c, "_chat",
+                        lambda system, user, max_tokens: '{"cs":[{"c":"X"}]}')
     res = c.complete(system="s", user="u", json_object=True)
     assert res.content == {"cs": [{"c": "X"}]}
+
+
+def test_local_client_uses_env_base_url(monkeypatch):
+    monkeypatch.setenv("LOCAL_LLM_BASE", "http://127.0.0.1:9999")
+    c = LocalClient()
+    assert c.base_url == "http://127.0.0.1:9999"
+    assert c.model == "lfm2.5:1.2b-instruct"
 
 
 def test_pick_generate_llm_local_vs_remote(monkeypatch):

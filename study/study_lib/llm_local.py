@@ -17,39 +17,62 @@ import re
 from typing import Any
 
 from .llm import LLMError, LLMResult, Usage
-from .postproc_katex import default_ollama_client
 
 
-# 기본 로컬 생성 모델 (env OLLAMA_MODEL 이 우선; 명시 없으면 최속 LFM2.5 CPU 경량)
+# 기본 로컬 생성 모델 이름 (llama.cpp server 는 한 gguf 모델이라 이름은 아직 참조용)
 def _model_default():
     return os.environ.get("OLLAMA_MODEL", "lfm2.5:1.2b-instruct")
 
 
+def _local_base():
+    """llama.cpp server(OpenAI 호환) 기본 주소 — host 네트워크에서 127.0.0.1:8080."""
+    return os.environ.get("LOCAL_LLM_BASE", "http://127.0.0.1:8080").rstrip("/")
+
+
 class LocalClient:
-    """Ollama 로 구조화 JSON 생성 — LLMClient(DeepSeek) 계약 호환."""
+    """로컬 추론 서버로 구조화 JSON 생성 — LLMClient(DeepSeek) 계약 호환.
 
-    def __init__(self, *, model: str | None = None,
-                 base_url: str | None = None, timeout: float = 900.0) -> None:
-        self._ollama = default_ollama_client()
-        # model/base_url은 env 로 기본 지정된 클라이언트가 이미 사용하되,
-        # 명시로 덮어쓸 수도 있다.
-        if model:
-            self._ollama.model = model
-        if base_url:
-            self._ollama.base_url = base_url.rstrip("/")
-        self._ollama.timeout = timeout
-        self.model = self._ollama.model
+    백엔드는 llama.cpp llama-server 의 OpenAI-호환 /v1/chat/completions (기본
+    127.0.0.1:8080). model 은 서버가 단일 gguf 를 띄우므로 body 에 넣지 않는다.
+    (이전 Ollama 벡엔드 대응이 필요하면 LOCAL_LLM_BASE 를 openai 호환 ollama
+    serve 주소로 바꾸면 됨.)
+    """
 
-    def _raw(self, prompt: str, system: str, num_predict: int) -> str:
-        # OllamaClient 내부 _call 은 /api/generate 로 system+prompt 를 보낸다.
+    def __init__(self, *, base_url: str | None = None,
+                 timeout: float = 1200.0) -> None:
+        self.base_url = (base_url or _local_base())
+        self.model = _model_default()
+        self.timeout = timeout
+
+    def _chat(self, system: str, user: str, max_tokens: int) -> str:
+        import httpx  # 선택 의존성 (DeepSeek 경로와 동일)
+        body = {
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": 0.0,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
         try:
-            return self._ollama._call(prompt, system=system)  # noqa: SLF001
-        except Exception as exc:  # 연결/타임아웃 → LLMError 로 승격
-            raise LLMError(f"local ollama failed: {exc}") from None
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.post(f"{self.base_url}/v1/chat/completions", json=body)
+            if r.status_code >= 400:
+                raise LLMError(f"local llm HTTP {r.status_code}: {r.text[:200]}")
+        except LLMError:
+            raise
+        except Exception as exc:
+            raise LLMError(f"local llm failed: {exc}") from None
+        try:
+            choices = r.json()["choices"]
+            return choices[0]["message"]["content"]
+        except Exception as exc:  # noqa: BLE001
+            raise LLMError(f"local llm bad response: {exc}") from None
 
     def complete(self, *, system: str, user: str, max_tokens: int = 1000,
                  json_object: bool = True) -> LLMResult:
-        raw = self._raw(user, system, max_tokens)
+        raw = self._chat(system, user, max_tokens)
         if json_object:
             payload = _parse_json(raw)
         else:
@@ -81,8 +104,8 @@ def _parse_json(raw: str) -> Any:
 
 
 def pick_generate_llm():
-    """LOCAL_LLM=1 이면 LocalClient, 아니면 (기존) DeepSeek FlashClient."""
+    """LOCAL_LLM=1 이면 로컬 llama.cpp server(LocalClient), 아니면 DeepSeek."""
     if os.environ.get("LOCAL_LLM", "0") == "1":
-        return LocalClient(model=_model_default())
+        return LocalClient()
     from .llm import FlashClient  # 지연 import — DeepSeek 경로는 키 필요 시에만
     return FlashClient()
