@@ -119,9 +119,22 @@ def main(argv=None) -> int:
         parser = PlanParser(Gateway(reg.role("parser").base_url))
 
     rag = _make_rag(args, reg) if args.rag else None
+    # live 이면 다른(논리적) 모델을 판사로 구성해 답 검증 (offline 은 판사 off)
+    vf = None
+    if live:
+        try:
+            from agent.verify import LlmVerifier, pick_judge_server
+            def vf(role):
+                try:
+                    u = pick_judge_server(role, reg)
+                except ValueError:
+                    return None
+                return LlmVerifier(Gateway(base_url=u), judge_role=u.rpartition(":")[2])
+        except Exception:  # noqa: BLE001
+            vf = None
     orch = Orchestrator(registry=reg, rag=rag,
                         gateway_factory=factory, parser=parser,
-                        note_dir=args.notes)
+                        note_dir=args.notes, verifier_factory=vf)
     if live and args.parser_live is False:
         # parser 서버가 안 켜져 있으면 오케스트레이터가 split_plan 으로 처리하도록
         print("[cli] live without parser-live → tickets via local split_plan")

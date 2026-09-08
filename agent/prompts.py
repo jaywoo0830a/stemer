@@ -56,12 +56,15 @@ _COMMON = (
     "similar problem. If asked to explain a property (e.g. why an integral over a "
     "symmetric interval is 0), address exactly that property and its conditions, "
     "not a bare antiderivative.\n"
-    "2. Treat REFERENCE CONTEXT as your primary source. When it is absent or "
-    "irrelevant, explicitly say '(general derivation — no study source)' and "
-    "never claim textbook provenance you do not have.\n"
-    "3. Do not invent citations, theorem/page numbers, or data.\n"
-    "4. Show reasoning step by step; state uncertainty.\n"
-    "5. Respond in markdown; math in LaTeX; concise but complete.\n"
+    "2. Treat REFERENCE CONTEXT as your primary source. When a reference chunk "
+    "states an explicit theorem/formula/bound, REPRODUCE it VERBATIM (symbols, "
+    "limits, conditions exactly as printed). Do NOT paraphrase, simplify, re-derive, "
+    "or write a different version of what the source states.\n"
+    "3. When the context is absent or irrelevant, explicitly say '(general "
+    "derivation — no study source)' — never claim textbook provenance you do not have.\n"
+    "4. Do not invent citations, theorem/page numbers, data, or bounds.\n"
+    "5. Show reasoning step by step; state uncertainty.\n"
+    "6. Respond in markdown; math in LaTeX; concise but complete.\n"
 )
 
 
@@ -155,10 +158,15 @@ def merge_results(results: Sequence[object]) -> str:
         role = getattr(r, "role", "")
         out = getattr(r, "output", "")
         err = getattr(r, "error", None)
+        grounded = getattr(r, "grounded", True)
+        gnote = getattr(r, "grounding_note", "")
         tag = f"Task {head} · {role}" if head is not None else (role or "agent")
         lines.append(f"## {tag}\n")
         if err:
             lines.append(f"> ⚠️ worker failed: {err}\n")
+        elif not grounded and out:
+            lines.append(f"> 🔴 UNGROUNDED — {gnote or 'did not reproduce source.\n'}")
+            lines.append(out.rstrip() + "\n")
         elif out:
             lines.append(out.rstrip() + "\n")
     return "\n".join(lines)

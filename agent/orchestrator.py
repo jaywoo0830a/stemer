@@ -43,6 +43,8 @@ class WorkerResult:
     output: str = ""
     error: Optional[str] = None
     sources: tuple[str, ...] = ()
+    grounded: bool = True       # grounding gate 통과 여부 (틀 이탈 없음)
+    grounding_note: str = ""
 
     @property
     def ok(self) -> bool:
@@ -71,6 +73,9 @@ class Orchestrator:
         parser=None,               # PlanParser (None → 오케스트레이터는 split_plan 사용)
         max_workers: int = 6,
         note_dir: Optional[str | Path] = None,
+        grounding_retries: int = 2,     # 검증 gate 재시도 (엄격 모드)
+        verifier=None,                  # Tier-2 LLM 판사 인스턴스 (verify.Verifier). 정적 시.
+        verifier_factory=None,          # (producer_role:str)->Verifier — 역할마다 다른 모델 판사
     ) -> None:
         self.registry = registry or Registry()
         self.pool = ServerPool(self.registry)
@@ -79,6 +84,9 @@ class Orchestrator:
         self.context_chars = context_chars
         self.parser = parser
         self.max_workers = max(1, int(max_workers))
+        self.grounding_retries = max(0, int(grounding_retries))
+        self.verifier = verifier
+        self._verifier_factory = verifier_factory
         self._factory = gateway_factory or _default_factory
         if note_dir is not None:
             os.environ["AGENT_NOTES_DIR"] = str(note_dir)
@@ -117,6 +125,7 @@ class Orchestrator:
         return jobs, path
 
     # -- 단일 티켓 실행 --
+    # -- 단일 티켓 실행 (Tier1 lexical gate + Tier2 LLM 판사) --
     def _run_one(self, task: Task) -> WorkerResult:
         role = task.role or "worker"
         query = task.input.strip() or f"{task.action} {task.target}"
@@ -128,22 +137,70 @@ class Orchestrator:
             except Exception as exc:  # noqa: BLE001 — RAG 장애는 worker 실패로 처리
                 return WorkerResult(task=task.id, role=role, error=f"RAG failed: {exc}")
 
-        # 다중 서버(worker/coder) pool 에서 하나 고르기
         srv = self.pool.next(role)
         gw = self._factory(srv.url, role)
+        from . import grounding, prompts
 
-        from . import prompts
+        qtext = task.input or task.desc
         system = prompts.system_prompt(role, task.id, len(chunks),
                                        action=task.action, target=task.target)
-        user = prompts.user_prompt(task.input or task.desc, chunks,
-                                   task_action=task.action,
-                                   task_target=task.target)
+        original_user = prompts.user_prompt(qtext, chunks,
+                                            task_action=task.action,
+                                            task_target=task.target)
+
+        last_reason = "verification failed"
         try:
-            out = gw.chat(system=system, user=user, max_tokens=2000)
+            for attempt in range(1 + self.grounding_retries):
+                user = original_user if attempt == 0 else grounding.correction_prompt(
+                    qtext, chunks, last_reason)
+                out = gw.chat(system=system, user=user, max_tokens=2000)
+
+                # Tier-1 (무료, 네트워크 없음): 완전 drift/빈 답 조기 배제
+                ok1, r1 = grounding.lexical_ok(qtext, chunks, out)
+                if not ok1:
+                    last_reason = r1
+                    if attempt < self.grounding_retries:
+                        continue
+
+                # Tier-2 (LLM 판사): 근거 기반 참/거짓·오류·예외
+                verdict = self._judge(qtext, chunks, out, role)
+                if ok1 and verdict.ok and verdict.grounded:
+                    return WorkerResult(task=task.id, role=role, url=srv.url,
+                                        output=out, grounded=True,
+                                        sources=tuple(c.source for c in chunks))
+                # 실패 사유 → 재시도, 소진되면 UNGROUNDED
+                last_reason = (verdict.human if not verdict.ok else
+                               "not grounded: " + (verdict.reason or r1))
+                if attempt < self.grounding_retries:
+                    continue
+                return WorkerResult(
+                    task=task.id, role=role, url=srv.url, output=out,
+                    grounded=False,
+                    grounding_note=(
+                        f"rejected x{self.grounding_retries + 1}: {last_reason}"),
+                    sources=tuple(c.source for c in chunks))
         except GatewayError as exc:
             return WorkerResult(task=task.id, role=role, url=srv.url, error=str(exc))
-        return WorkerResult(task=task.id, role=role, url=srv.url, output=out,
-                            sources=tuple(c.source for c in chunks))
+        raise RuntimeError("unreachable")  # noqa: B904  (guard)
+
+    def _judge(self, qtext, chunks, out: str, role: str):
+        """Tier-2 평결. verifier 를 구성하면 다른(엄격한) 모델에게 심판시키고,
+        없으면 Tier1(lexical) 결과로 통과(비용 0). 근거가 있는데 판사가 없으면
+        엄밀도가 떨어지므로 'no judge' 사유를 적어 둔다.
+        """
+        if self.verifier is not None:
+            return self.verifier.verify(qtext, chunks, out)
+        if self._verifier_factory is not None:
+            try:
+                v = self._verifier_factory(role)
+            except Exception:  # noqa: BLE001 — 판사 서버 부재 시 Tier1 로 폴백
+                v = None
+            if v is not None:
+                return v.verify(qtext, chunks, out)
+        from agent.verify import Verdict
+        if chunks:
+            return Verdict(ok=True, grounded=True, reason="no judge; Tier1 only")
+        return Verdict(ok=True, grounded=True, reason="free answer (no source)")
 
 
 def _default_factory(url: str, role: str) -> Gateway:

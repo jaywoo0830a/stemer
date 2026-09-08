@@ -123,3 +123,84 @@ def test_default_factory_uses_gateway_type():
     orch = Orchestrator(registry=Registry())
     gw = orch._factory("http://127.0.0.1:8081", "parser")
     assert isinstance(gw, Gateway)
+
+
+# --- 근거 충실도 gate (판사가 틀을 벗어난 답 거부/수용) ------------------------
+from agent.rag import Chunk  # noqa: E402
+from agent.verify import Verdict  # noqa: E402
+
+TWO = Chunk(source="calc", section="Remainder Estimate",
+            text="Theorem Integral Test Remainder Estimate: "
+                 "\\int _ { n + 1 } ^ \\infty f dx \\leqslant R_n \\leqslant "
+                 "\\int _ { n } ^ \\infty f dx .")
+GOOD = ("The bound keeps both sides: \\int _ { n + 1 } ^ \\infty f dx "
+        "\\leqslant R_n \\leqslant \\int _ { n } ^ \\infty f dx .")
+BAD = ("R_n bound ~ 1/(n+1) only: \\int _ { n + 1 } ^ \\infty f dx")
+
+
+class _StubRag:
+    def __init__(self, chunks):
+        self.chunks = list(chunks)
+    def retrieve(self, query, k=5):
+        return self.chunks[:k]
+
+
+class _BoundPreservingVerifier:
+    """판사 stub: 답이 두 하한(n, n+1)을 모두 담고 있어야 accept (의미 판정 대행)."""
+    def __init__(self, trace=None):
+        self.trace = trace if trace is not None else []
+    def verify(self, question, chunks, answer) -> Verdict:
+        self.trace.append(answer)
+        has_upper = "_ { n } " in answer or "_{ n }" in answer or "{ n } ^" in answer
+        if "\\int" in answer and has_upper:
+            return Verdict(ok=True, grounded=True,
+                           reason="both bounds preserved", judge_role="stub")
+        return Verdict(ok=False, grounded=False,
+                       errors=["answer narrows to a single (n+1) bound, drops n"],
+                       reason="one-sided bound", judge_role="stub")
+
+
+class _GoodAfterRetryTransport(FakeTransport):
+    """1차는 틀린(편도) 답, 교정(REJECTED...) 후엔 올바른 답."""
+    def __init__(self, call_log):
+        super().__init__()
+        self.log = call_log
+    def post_text(self, url, body, timeout):
+        msg = body["messages"][-1]["content"]
+        self.log.append(msg[:12])
+        content = GOOD if ("REJECTED" in msg or "VERIFY" in msg) else BAD
+        return {"choices": [{"message": {"role": "assistant", "content": content}}]}
+
+
+def test_grounding_gate_retries_then_accepts():
+    reg = Registry()
+    log = []
+    trace = []
+    orch = Orchestrator(registry=reg, rag=_StubRag([TWO]), grounding_retries=2,
+                        verifier=_BoundPreservingVerifier(trace),
+                        gateway_factory=lambda url, role: Gateway(
+                            base_url=url, transport=_GoodAfterRetryTransport(log)))
+    res, _ = orch.run_tasks([Task(id=1, action="explain", input="q?" , role="worker")],
+                            write=False)
+    assert res[0].grounded is True
+    assert res[0].ok
+    assert len(log) == 2        # 1)틀림(BAD) → 2)교정(GOOD) accepted
+    assert len(trace) == 2
+
+
+def test_grounding_gate_exhausts_marks_ungrounded():
+    class AlwaysBadTransport(FakeTransport):
+        def post_text(self, url, body, timeout):
+            return {"choices": [{"message": {"role": "assistant", "content": BAD}}]}
+
+    reg = Registry()
+    orch = Orchestrator(registry=reg, rag=_StubRag([TWO]), grounding_retries=2,
+                        verifier=_BoundPreservingVerifier(),
+                        gateway_factory=lambda url, role: Gateway(
+                            base_url=url, transport=AlwaysBadTransport()))
+    res, _ = orch.run_tasks([Task(id=1, action="explain", input="q?", role="worker")],
+                            write=False)
+    assert res[0].grounded is False
+    assert "rejected x3" in res[0].grounding_note
+
+

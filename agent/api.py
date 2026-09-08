@@ -64,6 +64,8 @@ class TaskOut(BaseModel):
     output: str = ""
     error: Optional[str] = None
     sources: List[str] = []
+    grounded: bool = True
+    grounding_note: str = ""
 
 
 class RunPlanResponse(BaseModel):
@@ -86,6 +88,7 @@ def create_app(
     rag=None,
     rag_k: int = 4,
     note_dir: str | Path | None = None,
+    judge: Optional[bool] = None,     # live 일 때 LLM 판사(다른 모델 검증) 사용 여부 (기본 on)
     mock_echo: bool = True,
 ) -> FastAPI:
     """FastAPI 앱.
@@ -93,12 +96,15 @@ def create_app(
     live: True → 실제 llama/Ollama, False → MockGateway(echo),
           None(기본) → env AGENT_MODE (mock|live, 기본 live).
     note_dir: 결과 저장 디렉터리. None → env AGENT_NOTES_DIR, 없으면 'notes'.
+    judge: live 이면 다른(논리적) 모델로 답을 검증(LlmVerifier). 기본 True.
+           env AGENT_JUDGE 로 판사 주소 재정의. offline(mock)에선 항상 off.
     """
     if live is None:
         live = os.environ.get("AGENT_MODE", "live").strip().lower() != "mock"
     reg = registry or load_registry()
     note_dir = str(note_dir or os.environ.get("AGENT_NOTES_DIR", "notes"))
     Path(note_dir).mkdir(parents=True, exist_ok=True)
+    use_judge = bool(judge) if judge is not None else live
 
     if live:
         def factory(url: str, role: str) -> Gateway:  # noqa: ARG001
@@ -106,6 +112,20 @@ def create_app(
     else:
         def factory(url: str, role: str) -> MockGateway:
             return MockGateway(url, role, echo=mock_echo)
+
+    # 판사: 생산자와 다른 모델로 (self-confirmation 방지). 역할별로 동적 선택.
+    if live and use_judge:
+        from .verify import LlmVerifier, pick_judge_server
+
+        def verifier_factory(producer_role: str):
+            try:
+                judge_url = pick_judge_server(producer_role, reg)
+            except ValueError:
+                return None
+            judge_role = judge_url.rpartition(":")[2]
+            return LlmVerifier(Gateway(base_url=judge_url), judge_role=judge_role)
+    else:
+        verifier_factory = None
 
     app = FastAPI(title="agent — local multi-agent orchestrator",
                   version="0.1.0", description=__doc__)
@@ -122,15 +142,26 @@ def create_app(
             rag_eff = _make_rag_from_name(use_rag, reg, live)
         return Orchestrator(
             registry=reg, rag=rag_eff, rag_k=rag_k,
-            gateway_factory=factory, parser=parser, note_dir=note_dir)
+            gateway_factory=factory, parser=parser, note_dir=note_dir,
+            verifier_factory=verifier_factory)
 
     @app.get("/health")
     def health() -> Dict[str, Any]:
+        judge_info = {}
+        if use_judge and live:
+            judge_info = {
+                "enabled": True,
+                "default": None,  # 역할별로 다를 수 있음 — 예: worker답→reasoner
+                "override": os.environ.get("AGENT_JUDGE") or "(auto)",
+            }
+        else:
+            judge_info = {"enabled": False, "note": "offline(mock) or judge disabled"}
         return {
             "ok": True, "mode": "live" if live else "mock",
             "roles": {name: list(r.urls) for name, r in reg.roles().items()},
             "note_dir": note_dir,
             "rag_connected": rag is not None,
+            "judge": judge_info,
             "store": _store_diagnostics(),
         }
 
@@ -182,7 +213,9 @@ def _to_response(results: Sequence[WorkerResult], path, stem: str,
                  live: bool) -> RunPlanResponse:
     markdown = path.read_text(encoding="utf-8") if path else ""
     tasks = [TaskOut(task=r.task, role=r.role, url=r.url, ok=r.ok,
-                     output=r.output, error=r.error, sources=list(r.sources))
+                     output=r.output, error=r.error, sources=list(r.sources),
+                     grounded=getattr(r, "grounded", True),
+                     grounding_note=getattr(r, "grounding_note", ""))
              for r in results]
     return RunPlanResponse(
         stem=stem, note_path=str(path) if path else "", markdown=markdown,

@@ -101,11 +101,15 @@ agent/
   registry.py  Registry(build_role/overrides/env), ServerPool(다중서버 순환)
   planner.py   PlanParser(parser 서버) + split_plan·_classify(로컬 결정적 티켓화)
   rag.py       KeywordRetriever / StudyStoreRetriever(study_lib store) / CodeIndex(§4.2 뼈대)
-  prompts.py   역할별 시스템 + 근거 인용(ctx block) + merge_results(markdown)
-  orchestrator.py  Orchestrator(run_plan/run_tasks, ThreadPool 병렬, WorkerResult)
+  prompts.py   역할별 system + 근거 인용(ctx block) + merge_results(markdown)
+  grounding.py  Tier-1 무료 게이트 (모듈 일반 규칙: 빈 답/완전 drift 차단, 교정 프롬프트)
+  verify.py     Tier-2 LLM 판사 — 논리적 모델(기본 reasoner 8088; 생산자가 reasoner면 coder)
+                로 답의 참/거짓·오류·예외를 구조화 JSON 평결. self-confirmation 방지.
+  orchestrator.py  Orchestrator(run_plan/run_tasks, ThreadPool 병렬, WorkerResult,
+                 겹레계정: Tier1→(판사)→재시도→소진 시 UNGROUNDED 플래그)
   cli.py       run/split/roles
   config/agent.yaml(.example)   ...
-  tests/       contract-style (fake transport/retriever)
+  tests/       contract-style (fake transport/retriever/judge)
 ```
 
 ## 남은 후속(선택)
