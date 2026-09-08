@@ -105,7 +105,7 @@ class Orchestrator:
         rag_k: int = 4,
         context_chars: int = 6000,
         parser=None,               # PlanParser (None → 오케스트레이터는 split_plan 사용)
-        max_workers: int = 6,
+        max_workers: Optional[int] = None,   # env AGENT_MAX_WORKERS 로 오버라이드
         note_dir: Optional[str | Path] = None,
         grounding_retries: int = 2,     # 검증 gate 재시도 (엄격 모드)
         verifier=None,                  # Tier-2 LLM 판사 인스턴스 (verify.Verifier). 정적 시.
@@ -118,6 +118,8 @@ class Orchestrator:
         self.rag_k = rag_k
         self.context_chars = context_chars
         self.parser = parser
+        if max_workers is None:
+            max_workers = int(os.environ.get("AGENT_MAX_WORKERS", "8"))
         self.max_workers = max(1, int(max_workers))
         self.grounding_retries = max(0, int(grounding_retries))
         self.verifier = verifier
