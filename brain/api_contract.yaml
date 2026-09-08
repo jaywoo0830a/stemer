@@ -1,0 +1,310 @@
+openapi: 3.2.0
+info:
+  title: Local AI Service Contract
+  description: |
+    OpenAPI contract for the local AI micro‑services used by the
+    study_lib pipeline (parser, embedder, retriever, generator).
+    All services expose a JSON‑only REST API. The contract is versioned
+    independently of the implementation – any project can import this
+    file and generate client stubs or validate requests/responses.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8000
+    description: Default local development server
+
+paths:
+  /parse:
+    post:
+      summary: Parse a source document into a markdown representation
+      operationId: parseDocument
+      tags:
+        - parser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParseRequest'
+      responses:
+        '200':
+          description: Successful parsing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseResponse'
+        default:
+          description: Error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /embed:
+    post:
+      summary: Convert a list of texts into dense vectors
+      operationId: embedTexts
+      tags:
+        - embedder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmbedRequest'
+      responses:
+        '200':
+          description: Embedding result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbedResponse'
+        default:
+          description: Error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /retrieve:
+    post:
+      summary: Retrieve nearest chunks for a query vector
+      operationId: retrieveChunks
+      tags:
+        - retriever
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetrieveRequest'
+      responses:
+        '200':
+          description: Retrieval result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrieveResponse'
+        default:
+          description: Error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /generate:
+    post:
+      summary: Generate a structured JSON payload for a topic
+      operationId: generateContent
+      tags:
+        - generator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateRequest'
+      responses:
+        '200':
+          description: Generation result (JSON payload)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateResponse'
+        default:
+          description: Error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    # ---------- Request Schemas ----------
+    ParseRequest:
+      type: object
+      required:
+        - path
+        - profile
+        - book_id
+      properties:
+        path:
+          type: string
+          format: uri
+          description: Absolute path to the source file (markdown, pdf, …)
+        profile:
+          type: string
+          description: Chunking profile name (e.g. "text", "pdf")
+        book_id:
+          type: string
+          description: Unique identifier for the book being parsed
+    EmbedRequest:
+      type: object
+      required:
+        - texts
+      properties:
+        texts:
+          type: array
+          items:
+            type: string
+          description: List of raw text strings to embed
+
+    RetrieveRequest:
+      type: object
+      required:
+        - vector
+      properties:
+        vector:
+          type: array
+          items:
+            type: number
+            format: float
+          description: Query embedding vector
+        k:
+          type: integer
+          default: 5
+          minimum: 1
+          description: Number of top hits to return
+
+    GenerateRequest:
+      type: object
+      required:
+        - topic
+        - context
+        - schema
+        - json_object
+      properties:
+        topic:
+          $ref: '#/components/schemas/Topic'
+        context:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchHit'
+        schema:
+          type: object
+          description: JSON‑GBNF schema that the LLM output must obey
+        json_object:
+          type: boolean
+          default: true
+          description: Instruct the model to return a JSON object
+
+    # ---------- Response Schemas ----------
+    ParseResponse:
+      type: object
+      required:
+        - book_id
+        - markdown
+      properties:
+        book_id:
+          type: string
+        markdown:
+          type: string
+          description: Full markdown representation of the source document
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Arbitrary metadata extracted during parsing
+
+    EmbedResponse:
+      type: object
+      required:
+        - vectors
+      properties:
+        vectors:
+          type: array
+          items:
+            type: array
+            items:
+              type: number
+              format: float
+          description: List of embedding vectors matching the input order
+
+    RetrieveResponse:
+      type: object
+      required:
+        - hits
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchHit'
+    GenerateResponse:
+      type: object
+      description: |
+        The payload is validated against the supplied GBNF schema.
+        Its concrete shape is therefore defined by the schema at runtime.
+      additionalProperties: true
+
+    # ---------- Shared Schemas ----------
+    Topic:
+      type: object
+      required:
+        - topic_id
+        - book_id
+        - title
+        - kind
+      properties:
+        topic_id:
+          type: string
+        book_id:
+          type: string
+        title:
+          type: string
+        kind:
+          type: string
+          enum: [exam, lecture, problem]
+        section:
+          type: string
+          description: Optional section identifier (e.g. "3.5")
+        status:
+          type: string
+          enum: [todo, draft, done, failed]
+          description: Current processing status
+
+    SearchHit:
+      type: object
+      required:
+        - chunk_id
+        - book_id
+        - section
+        - text
+        - score
+      properties:
+        chunk_id:
+          type: string
+        book_id:
+          type: string
+        section:
+          type: string
+        text:
+          type: string
+        score:
+          type: number
+          format: float
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human‑readable error message
+        code:
+          type: integer
+          description: Optional error code (e.g. HTTP status)
+        details:
+          type: object
+          additionalProperties: true
+          description: Optional extra debugging information
+
+  securitySchemes: {}
+
+tags:
+  - name: parser
+    description: Convert source documents into markdown and metadata
+  - name: embedder
+    description: Produce dense vector embeddings from raw text
+  - name: retriever
+    description: Perform vector‑based nearest‑neighbour search
+  - name: generator
+    description: Generate JSON‑structured content using a local LLM

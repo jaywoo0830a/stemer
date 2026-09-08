@@ -1,0 +1,22 @@
+# agent/config/agent.yaml — 서버별 추론 서버 주소 (이 저장소 = 오케스트레이터).
+# myllm 은 이 서버들만 띄워주고(8081 parser, 8082-8085 worker, 8086-8087 coder,
+# 8088 reasoner, Ollama 11434 embed), 이 파일이 "어느 역할 → 어느 주소"를 결정한다.
+# 파일이 없으면 agent/registry.py 기본값 + AGENT_* env 로 대체.
+#
+# 로컬 데모(192.99.201.121 에서)는 127.0.0.1 로 그대로. 원격에서 접속 시
+# 192.99.201.121:808x 로 바꾸거나, 로컬에서 ssh 터널:
+#   ssh -L 8081:127.0.0.1:8081 ... -L 8088:127.0.0.1:8088 ubuntu@192.99.201.121
+servers:
+  parser:
+    urls: ["http://127.0.0.1:8081"]
+  worker:
+    urls: ["http://127.0.0.1:8082", "http://127.0.0.1:8083",
+           "http://127.0.0.1:8084", "http://127.0.0.1:8085"]
+  coder:
+    urls: ["http://127.0.0.1:8086", "http://127.0.0.1:8087"]
+  reasoner:
+    urls: ["http://127.0.0.1:8088"]
+  embed:
+    kind: embed
+    urls: ["http://127.0.0.1:11434"]     # Ollama — llama-server 들은 --embeddings 없음
+    model: qwen2.5:3b

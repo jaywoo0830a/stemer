@@ -1,0 +1,9 @@
+services:
+  - name: parser
+    url: http://localhost:8001
+  - name: embedder
+    url: http://localhost:8002
+  - name: retriever
+    url: http://localhost:8003
+  - name: generator
+    url: http://localhost:8004
