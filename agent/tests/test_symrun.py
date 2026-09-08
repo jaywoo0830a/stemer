@@ -116,3 +116,79 @@ def test_extract_code_blocks_covers_python_fence():
     text = "```sympy\nx=1\n``` then ```python\ny=2\n```"
     assert S.extract_code_blocks(text) == ["x=1", "y=2"]
 
+
+# ---- run_gate(도크트린 "실행 없이는 통과 없다") 새 계약 ----
+def _gate_of(text):
+    return S.run_gate(text)[0]
+
+
+def test_run_gate_concept_problem_needs_no_code():
+    p = ("PROBLEM 1\nQuestion: state the comparison test hypothesis.\n"
+         "Solution key: positive decreasing integrable => series behaves like integral.\n"
+         "Difficulty: easy")
+    g = _gate_of(p)
+    assert g.requires is False and g.has_code is False and g.hard is None
+
+
+def test_run_gate_concept_problem_with_casual_index_not_compute():
+    # Σ_{n=1} 하한 같은 '부수 =숫자' 는 계산 답이 아니다 → 코드 불요
+    p = ("PROBLEM 1\nQuestion: decide convergence of sum 1/sqrt(n).\n"
+         "Solution key: by the p-test it diverges.\nDifficulty: easy")
+    g = _gate_of(p)
+    assert g.requires is False and g.hard is None
+
+
+def test_run_gate_missing_code_block_is_hard():
+    p = ("PROBLEM 1\nQuestion: find smallest n so R_n < 0.001.\n"
+         "Solution key: n=23\nDifficulty: medium")
+    g = _gate_of(p)
+    assert g.requires is True and g.has_code is False
+    assert g.hard_code == "missing_code_block"
+
+
+def test_run_gate_exec_error_is_hard():
+    p = ("PROBLEM 1\nQuestion: find n so error < 0.0005\nSolution key: n=32\n"
+         "```python\nfrom sympy import *\n1/0\n```")
+    g = _gate_of(p)
+    assert g.requires and g.has_code
+    assert g.hard_code == "execution_error"
+
+
+def test_run_gate_value_mismatch_is_hard():
+    p = ("PROBLEM 1\nQuestion: compute n\nSolution key: n=45\n"
+         "```python\nfrom sympy import *\nprint(ceiling(sqrt(1000)))\n```")
+    g = _gate_of(p)
+    assert g.hard_code == "value_mismatch"
+
+
+def test_run_gate_clean_ok():
+    p = ("PROBLEM 1\nQuestion: find n so R_n < 0.0005\nSolution key: n=32\n"
+         "```python\nfrom sympy import *\nprint(ceiling(sqrt(1000)))\n```")
+    g = _gate_of(p)
+    assert g.hard is None
+
+
+def test_run_gate_placeholder_accepted_and_captured():
+    p = ("PROBLEM 1\nQuestion: compute the value\n"
+         "Solution key: final = <<RESULT>>\n"
+         "```sympy\nfrom sympy import *\nprint(Rational(3,4))\n```")
+    g = _gate_of(p)
+    assert g.hard is None and abs(g.placeholder_value - 0.75) < 1e-9
+
+
+def test_run_gate_placeholder_without_number_rejected():
+    p = ("PROBLEM 1\nQuestion: compute the value\nSolution key: =<<RESULT>>\n"
+         "```sympy\nfrom sympy import *\nprint(symbols('n'))\n```")
+    g = _gate_of(p)
+    assert g.hard_code == "execution_error"
+
+
+def test_substitute_results_fills_placeholder():
+    p = ("PROBLEM 1\nQuestion: value?\nSolution key: = <<RESULT>>\n"
+         "```sympy\nfrom sympy import *\nprint(Rational(1,2))\n```")
+    out = S.substitute_results(p)
+    assert "<<RESULT>>" not in out
+    # 정확히 실제 값(0.5)으로 채워짐 (Rational print 되면 유리수 표기가 쓰임)
+    assert "final" in out or "0.5" in out
+
+

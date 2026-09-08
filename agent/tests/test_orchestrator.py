@@ -204,21 +204,28 @@ def test_grounding_gate_exhausts_marks_ungrounded():
     assert "rejected x3" in res[0].grounding_note
 
 
-# --- 출제(problems) 경로: 구조 gate만 통과·숫자 앵커 생략 (신규 생성 수용) -------
+# --- 출제(problems) 경로: 실행-기반 게이트(SYMPYMETHOD) ---
+# 문제1 = 개념(코드 불요), 문제2 = 수치(실행 코드 필수·지침 준수) 로 구성.
 PROBSET = """PROBLEM 1 — [Integral Test]
 Question: Decide convergence of Σ_{n=1}^{∞} 1/sqrt(n) by the Integral Test.
 Solution key: ∫_1^∞ x^{-1/2} dx diverges; hence series diverges.
 Difficulty: easy
 
 PROBLEM 2 — [Remainder Estimate]
-Question: For Σ 1/n^3 use R_n ≤ 1/(2 n^2); find n so the error < 0.001.
-Solution key: 1/(2 n^2) < 0.001 → n ≥ 23 (use the source's method).
+Question: For Σ 1/n^3 use R_n ≤ 1/(2 n^2); find the smallest n so the error < 0.001.
+Solution key: require 1/(2 n^2) < 0.001 → n = 23.
+```sympy
+from sympy import *
+n = ceiling(sqrt(1/(2*Rational(1,1000))))
+answer = n
+print(answer)
+```
 Difficulty: medium
 """
 
 
 def test_problems_action_accepted_via_structure_gate():
-    """numbers 가 source 의 '32'와 달라도(신규 출제) 문제모드로 수용돼야 한다."""
+    """실행 코드가 답(23· source 예제와 달라도)과 일치하는 신규 출제는 수용돼야."""
     class ProbTransport(FakeTransport):
         def post_text(self, url, body, timeout):
             return {"choices": [{"message": {"role": "assistant", "content": PROBSET}}]}
@@ -236,7 +243,7 @@ def test_problems_action_accepted_via_structure_gate():
 
 
 def test_problems_action_failed_by_problems_judge():
-    """구조 통과해도 출제-판사(ProblemsVerifier)가 거부하면 재시도 후 UNGROUNDED."""
+    """실행 게이트는 통과해도 출제-판사(ProblemsVerifier)가 거부하면 재시도 후 UNGROUNDED."""
     from agent.verify import Verdict
     from agent.rag import Chunk as _C2
 
@@ -263,15 +270,15 @@ def test_problems_action_failed_by_problems_judge():
     res, _ = orch.run_tasks(
         [Task(id=1, action="problems", input="make problems", role="worker")],
         write=False)
-    assert res[0].ok and res[0].output   # 답은 있으나
-    assert res[0].grounded is False      # 출제-판사가 거부 → ungrounded
+    # 실행 게이트는 통과하지만 판사가 extra_claim 으로 거부 → 최종 UNGROUNDED
+    assert res[0].grounded is False
     assert "extra_claim" in res[0].grounding_note
 
 
 # --- SYMPY 실행 계층(SYMPYMETHOD) 게이트: 손계산 드리프트 결정론 차단 ----
 _NUMERIC_CLEAN = """PROBLEM 1 — [Remainder Estimate]
 Question: For Σ 1/k^3 use R_n ≤ 1/(2 n^2); find the smallest n so the error < 0.0005.
-Solution key: require 1/(2 n^2) < 0.0005 → n > sqrt(1000) ≈ 31.6, round up → 32.
+Solution key: require 1/(2 n^2) < 0.0005 → n = 32.
 ```sympy
 from sympy import *
 n = ceiling(sqrt(1/(2*Rational(1,2000))))
@@ -281,7 +288,7 @@ print(answer)
 Difficulty: medium
 """
 
-_NUMERIC_DRIFT = _NUMERIC_CLEAN.replace("→ 32.", "→ 45.")
+_NUMERIC_DRIFT = _NUMERIC_CLEAN.replace("→ n = 32.", "→ n = 45.")
 
 
 def _problems_transport(payload: str):
@@ -307,11 +314,11 @@ def test_sympy_gate_accepts_clean_numeric_problem():
               input="make a problem needing a smallest-n", role="worker")],
         write=False)
     assert res[0].ok and res[0].grounded is True
-    assert "sympy" in res[0].grounding_note
+    assert "problem set accepted" in res[0].grounding_note
 
 
 def test_sympy_gate_rejects_hand_calculation_drift():
-    """Solution key 는 45라 적었는데 sympy 가 32를 낸다 → 판사 없이도 결정론 거부."""
+    """Solution key 는 45라 적었는데 실행 코드가 32를 낸다 → 판사 없이도 결정론 거부."""
     from agent.rag import Chunk as _C2
     reg = Registry()
     orch = Orchestrator(
@@ -325,8 +332,29 @@ def test_sympy_gate_rejects_hand_calculation_drift():
         [Task(id=1, action="problems", input="make a problem", role="worker")],
         write=False)
     assert res[0].grounded is False
-    assert "sympy gate" in res[0].grounding_note
-    assert "hand-calc drift" in res[0].grounding_note or "32" in res[0].grounding_note
+    assert "value_mismatch" in res[0].grounding_note or "45" in res[0].grounding_note
+
+
+def test_sympy_gate_rejects_missing_code_block():
+    """수치 질문(작은 n/how many)인데 코드 블록이 없으면 판사 없이도 결졍적으로 거부."""
+    from agent.rag import Chunk as _C2
+    ncode = ("PROBLEM 1 — [Remainder Estimate]\n"
+             "Question: find the smallest n so the remainder R_n < 0.0005.\n"
+             "Solution key: 1/(2 n^2) < 0.0005, so n = 32.\n"
+             "Difficulty: medium")
+    reg = Registry()
+    orch = Orchestrator(
+        registry=reg,
+        rag=_StubRag([_C2(source="calc", section="11.3",
+                          text="Integral Test Remainder Estimate.")]),
+        grounding_retries=0,
+        gateway_factory=lambda url, role: Gateway(
+            base_url=url, transport=_problems_transport(ncode)()))
+    res, _ = orch.run_tasks(
+        [Task(id=1, action="problems", input="make a problem", role="worker")],
+        write=False)
+    assert res[0].grounded is False
+    assert "missing_code_block" in res[0].grounding_note or "exec gate" in res[0].grounding_note
 
 
 

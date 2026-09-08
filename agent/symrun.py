@@ -1,20 +1,22 @@
-"""symrun — '계산은 모델이 아니라 sympy' 실행 계층 (SYMPYMETHOD.md).
+"""symrun — "계산은 모델이 아니라 sympy"(SYMPYMETHOD) 실행 계층.
 
-원칙:
-  - 문제 생성 에이전트는 숫자를 암산 금지. 각 수치 해답 근처에 실행 가능한
-    ```sympy``` 블록을 내고, 그 블록의 출력이 Solution key 의 최종 답이어야 함.
-  - 이 모듈이 그 블록을 실제로 로컬 실행해
-      1) 문법/실행 오류 여부(작성 실패 = 신뢰 불가 → 거부),
-      2) 최종 수치 값 추출(sympy) 후,
-      3) Solution key 에 적힌 답과 일치하는지(손계산 드리프트 탐지) 비교하는
-    결정론적 게이트를 제공한다.
+원칙(개정 — '실행 없이는 통과 없다'):
+  - 문제 생성 에이전트가 숫자를 암산 금지; 각 수치 해답은 실행 가능한 코드
+    블록(```sympy```/```python``` **둘 다**, 텍스트 위장 불가)이 계산해 내야 한다.
+  - 이 모듈이 그 코드를 실제로 로컬 실행해,
+       1) 코드 없음(계산 문제)        -> missing_code_block  (하드 거부)
+       2) 실행 오류/시간초과/금지토큰  -> execution_error     (하드 거부)
+       3) 실행 수치와 Solution key 불일치 -> value_mismatch   (하드 거부)
+      를 LLM 판사 여부와 무관하게 결정론으로 낸다(run_gate).
+  - 순수 개념 문제(계산 결과를 요구하지 않는 문제)만 코드 블록을 면제한다
+    (함수가 *반환*하는 숫자 리터럴은 요구 안 함 — 오탐 방지).
+  - 수용 시, Solution key 의 <<RESULT>> 자리에 실제 실행 값을 채워(시스템이 직접
+    계산) 사용자에게 확정 숫자만 보여준다(substitute_results).
 
 안전한 실행:
-  - 시간 제한(timeout), 내장 임포트 차단, 순수 sympy + print 만 허용하는
-    축소된 전역에서 exec. LLM 이 만든 임의 코드를 exec 하는 위험을 최소화.
-    (운영에서 완전한 샌드박스는 Docker 컨테이너에서 구동 권장.)
-sympy 미설치 시: run 은 unavailable → 게이트는 false판정 방향이 아닌
-'동작 불가(no_sympy)' 플래그로 호출자에게 알림(설치 안 된 환경에선 건너뜀).
+  - 시간 제한(timeout), 축소 내장, 오로지 sympy(+print) 허용 전역으로 exec.
+    LLM 이 만든 임의 코드 실행 위험을 최소화(운영: Docker 샌드박스 권장).
+sympy 미설치: run 은 unavailable → 호출 측이 no_sympy 로 처리(수용 불가 방향).
 """
 from __future__ import annotations
 
@@ -271,3 +273,155 @@ def count_mismatches(problem_set: str) -> List[dict]:
                                        "is absent from this problem's "
                                        "Solution key (possible hand-calc drift)")})
     return out
+
+
+# ---------------------------------------------------------------------------
+# SYMPYMETHOD 개정판 — "실행 없이는 통과 없다" (python/sympy 펜스, text 위장 모두 차단)
+# ---------------------------------------------------------------------------
+# doctrine:
+#   1) 계산이 필요한 문제(수치 답 존재/코드 존재/<<RESULT>> 사용)에 코드가 없으면
+#      advisory 가 아닌 **hard 거부 (missing_code_block)**.
+#   2) 실행 오류(execution_error), 코드 결과와 답 불일치(value_mismatch) → hard 거부.
+#   3) 순수 개념 문제(숫자·코드·플레이스홀더 전부 없음)만 코드 요구를 면제.
+#   4) LLM 판사에게는 "실행 결과"를 구조적으로 주입(추측 방지).
+_PLACEHOLDER = re.compile(r"<<RESULT>>|<<result>>")
+# '답으로 주장된 수치' 휴리스틱(발주 취지 — 자유 텍스트 숫자 전부가 답은 아님:
+#  지수/라벨 같은 부수 숫자는 제외하고, 등호/≈/boxed/answer 뒤의 값만 답으로 본다.)
+_ANSWER_LITERAL = re.compile(
+    r"(?:=\s*|≈\s*|answer\s*(?:is|:)?\s*|results?\s*:|boxed\{|so\s+)"
+    r"(\d+(?:\.\d+)?(?:e[+-]?\d+)?|<<RESULT>>)", re.IGNORECASE)
+# 목표 수치를 요구하는 '계산 명령' 어휘 (find/compute/... for a number)
+_TARGET_IMPERATIVE = re.compile(
+    r"\b(find|compute|evaluate|determine|calculate|solve for|which n|smallest|"
+    r"least|how many terms|how many|first \d+\s*terms|find the (?:sum|value|limit|"
+    r"root|integral|partial sum)|remainder\s*[<≤]|error\s*[<≤]|"
+    r"within|accurate to|to three decimals)\b", re.IGNORECASE)
+_digits = re.compile(r"\d")
+
+
+
+@dataclass
+class BlockGate:
+    """한 실행 코드 블록의 실행 결과."""
+    ok: bool
+    value: Optional[float] = None
+    error: Optional[str] = None
+    code: str = ""
+
+
+@dataclass
+class ProblemGate:
+    """한 문제의 실행-기반 검증 요약."""
+    idx: int
+    piece: str = ""                       # 문제 단위 원문
+    requires: bool = False                # 계산 필요(코드/수치/플레이스홀더)
+    has_code: bool = False
+    blocks: List[BlockGate] = field(default_factory=list)
+    hard: Optional[str] = None            # 결정론 거부 사유(없으면 None)
+    hard_code: Optional[str] = None       # execution_error|value_mismatch|missing_code
+    placeholder_value: Optional[float] = None
+
+    @property
+    def block_text(self) -> str:
+        return "\n".join(b.code for b in self.blocks)
+
+
+def _has_declared_final(blk: str) -> bool:
+    """문제가 '계산 결과'를 요구하는지(→ 실행 코드 블록 필수인지) 결정론 판정.
+
+    판정 = 아래 중 하나라도 참이면 그 문제는 계산/수치 결과를 요구:
+      - <<RESULT>> 플레이스홀더 사용,
+      - 질문이 목표 수치를 요구하는 도치 명령(find n / error < eps / fewest terms …)
+        을 숫자와 함께 사용.
+    주의: 자유 텍스트의 '=1' 류(예: Σ_{n=1} 하한, 정의의 등식)는 '답'이 아니라
+    부수 표기라 답으로 취급하지 않는다(전역 '= number' 휴리스틱은 여기 사용 안 함
+    → 오탐 방지). 실제 '답으로서의 수치'는 프롬프트가 <<RESULT>> 또는 경우에 따라
+    코드 출력 에코(기존 solution_has_value)로 강제한다.
+    """
+    if _PLACEHOLDER.search(blk):
+        return True
+    return bool(_TARGET_IMPERATIVE.search(blk) and _digits.search(blk))
+
+
+def run_gate(problem_set: str) -> List[ProblemGate]:
+    """도크트린 실행 게이트 — 문제 단위로 코드 실행 + 거부 판정을 결정론으로 낸다.
+
+    반환의 각 ProblemGate.hard/hard_code 가 None 이면 그 문제는 '실행 기반으로는
+    통과'로 간주(개념 문제 포함). orchestrator 는 이를 모아 재시도/거부를 결정한다.
+    """
+    blocks = split_problem_blocks(problem_set or "")
+    out: List[ProblemGate] = []
+    for idx, piece in enumerate(blocks):
+        code_list = extract_code_blocks(piece)
+        executed = [run_block(c) for c in code_list]
+        gates = [BlockGate(ok=r.ok, value=r.value, error=r.error, code=c)
+                 for r, c in zip(executed, code_list)]
+        has_ph = bool(_PLACEHOLDER.search(piece))
+        needs = bool(code_list) or has_ph or _has_declared_final(piece)
+        g = ProblemGate(idx=idx, piece=piece, requires=needs,
+                        has_code=bool(code_list), blocks=gates)
+
+        if not needs:
+            # 순수 개념: 코드 불요 → 실행 기준 통과.
+            out.append(g)
+            continue
+        if not code_list:
+            g.hard = ("missing_code_block: problem needs a numeric/algebraic "
+                      "answer yet supplies no executable sympy/python block")
+            g.hard_code = "missing_code_block"
+            out.append(g)
+            continue
+        # 코드가 있음 → 각각 실행 결과 검증
+        ok_runs = [b for b in gates if b.ok]
+        for b in gates:
+            if not b.ok:
+                g.hard = (f"execution_error: an executable block failed "
+                          f"({b.error}). No un-executed number may stand.")
+                g.hard_code = "execution_error"
+                break
+        if g.hard:
+            out.append(g)
+            continue
+        # 실행 성공. 두 모드로 나뉜다:
+        #  A) <<RESULT>> placeholder 가 있으면 → 그 값을 시스템이 채우므로, 답 텍스트에
+        #     수치를 되뇌이라는 에코 검증은 하지 않는다(placeholder 자체가 합법 자리).
+        #     다만 실행이 실제 수치를 냈는지는 필수.
+        #  B) placeholder 없이 저자가 숫자를 직접 적었다면 → 그 숫자가 실행 출력과
+        #     일치해야 한다(수동 계산 drift 차단 = value_mismatch).
+        if has_ph:
+            vals = [b.value for b in ok_runs if b.value is not None]
+            if not vals:
+                g.hard = ("execution_error: <<RESULT>> used but no numeric value "
+                          "was produced by the code block")
+                g.hard_code = "execution_error"
+            else:
+                g.placeholder_value = vals[-1]
+            out.append(g)
+            continue
+        for b in ok_runs:
+            if b.value is not None and not solution_has_value(piece, b.value):
+                vfmt = (int(b.value) if abs(b.value - round(b.value)) < 1e-9
+                        else f"{b.value:.10g}")
+                g.hard = (f"value_mismatch: executed code outputs {vfmt}, which "
+                          "the Solution key does not echo (hand-calc drift / "
+                          "unexecuted number)")
+                g.hard_code = "value_mismatch"
+                break
+        out.append(g)
+    return out
+
+
+def substitute_results(problem_set: str) -> str:
+    """출력용: 실행 로직이 계산한 값으로 각 문제의 ```<<RESULT>>``` 를 실제
+    숫자로 치환해 사용자에게 보여준다 (실패/미실행 문제는 이 단계에서 이미 hard
+    거부되었으므로, 여기 남는 placeholder 는 정상 실행 문제의 결과만 채운다)."""
+    blocks = split_problem_blocks(problem_set or "")
+    gates = run_gate(problem_set or "")
+    rebuilt = []
+    for gi, piece in enumerate(blocks):
+        gv = gates[gi].placeholder_value if gi < len(gates) else None
+        if gv is not None:
+            v = (int(gv) if abs(gv - round(gv)) < 1e-9 else f"{gv:.10g}")
+            piece = _PLACEHOLDER.sub(str(v), piece)
+        rebuilt.append(piece)
+    return "\n\n".join(rebuilt)

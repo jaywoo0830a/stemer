@@ -172,6 +172,15 @@ scope:
           block — omit it there.
        e) If sympy genuinely cannot compute the value, write
           '(sympy cannot compute this)' instead of a hand-guessed number.
+       f) MANDATORY EXECUTABLE RESULT (Strict): A Solution key may state its
+          final numeric answer EITHER (i) write the placeholder <<RESULT>> at the
+          answer position (the system runs your code and replaces it with the
+          real value), OR (ii) write the literal number — but that literal MUST
+          be exactly what your code block's final printed value is. Never write
+          a literal that differs from your own executed code. Writing
+          <<RESULT>> without any executable code block is also rejected
+          (missing_code_block). Every numeric problem therefore needs a complete,
+          runnable block that prints one final number.
     6. SELF-CHECK BEFORE OUTPUT:
        a) Is every single theorem/fact used in my Question and Solution key 
           verbatim or trivially derivable from the REFERENCE CONTEXT?
@@ -238,22 +247,19 @@ judge:
       key collapses the two sides to one number/limit, treat it as inconsistent.
     - New numbers the author chose are allowed; do not reject merely for differing
       from an example in the source.
-    - SYMPY VERIFICATION (Critical): For each problem, if its Solution key ends in a
-      concrete numeric value/count/result that had to be computed, check that an
-      executable ```sympy``` block immediately follows that actually produces that
-      number:
-        * Missing executable sympy code for a numeric-answer problem ->
-          error_code: missing_sympy.
-        * The Solution key's final number does not match what its sympy code would
-          compute -> error_code: hand_calculation_error (the classic arithmetic or
-          index slip; NEVER let a hand-derived number stand).
-        * The sympy code has a syntax/exec error or typo (not directly runnable by
-          `python -c "from sympy import *; ...`-style execution) -> treat as a
-          broken verification and reject (hand_calculation_error or other).
-      Concept/theorem-only problems with no numeric endpoint need no sympy block;
-      do not falsely require one there. A '[SYMRUN-ADVISORY]' note in the candidate
-      may list problems lacking a block — your job is ONLY to enforce missing_sympy
-      for the ones that actually need numerics.
+    - SYMPY VERIFICATION (Critical): Numeric answers/counts that needed computing
+      are determined by an EXECUTION-VERIFICATION layer that RAN the author's own
+      ```sympy```/```python``` blocks and confirmed the printed value equals the
+      Solution key (missing/erroring/mismatched code are already rejected before
+      you). An '[EXECUTION-VERIFICATION]' note in the candidate lists those
+      machine-run accepted numbers. Therefore:
+        * DO NOT mentally re-run or guess code correctness — rely on that note.
+        * Judge the remaining quality axes below (grounding/bounds/concreteness).
+        * If a Solution key asserts a NEW numeric endpoint NOT covered by the
+          EXECUTION-VERIFICATION note (an unverified extra number), treat it as
+          hand_calculation_error / missing_sympy and reject.
+      Concept/theorem-only problems legitimately have no block and no verification
+      note entry; do not demand one there.
     Return ONLY a strict JSON object (no prose):
     {"ok": bool, "grounded": bool, "errors":[string], "error_codes":[string],
      "exceptions":[string], "reason":string}

@@ -28,6 +28,19 @@ from .planner import PlanParser, Task, split_plan
 from .registry import Registry, ServerPool
 from .rag import Chunk, Retriever
 
+
+class _ProblemsRetry(Exception):
+    """문제 출제(problems) 경로에서 재시도가 남았음을 알리는 내부 신호.
+
+    _run_problems_exec 가 '틀렸지만 교정 시도 여지가 있음'을 알리면 _run_one 이
+    수신해 다음 attempt 의 교정 프롬프트로 continue 한다(스레드 안전 무상태 신호).
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 ResultWriter = Callable[[str, str], Path]  # (markdown, stem) -> path
 
 
@@ -189,62 +202,16 @@ class Orchestrator:
                     return mk(out, ok=False,
                               note=f"rejected x{self.grounding_retries + 1}: {last_reason}")
 
-                # 출제(problems)
                 if is_problems:
-                    # 결정론 sympy 게이트 (SYMPYMETHOD): 블록이 깨졌거나(실행 오류)
-                    # 코드가 실제로 낸 수치를 Solution key 가 안 쓰면 = 손계산 드리프트.
-                    # (개념만 묻는 문제는 코드를 안 쓸 수 있어서 그 자체로는 거부 안 함
-                    #  → missing_sympy 판단은 아래 LLM problems-judge 에 위임)
-                    from . import symrun
-                    hard = []
-                    advis = []
+                    # SYMPYMETHOD 도크트린 — "실행 없이는 통과 없다." 문제 출제만.
                     try:
-                        for mm in symrun.count_mismatches(out):
-                            reason = mm.get("reason") or ""
-                            bm = f"problem {mm.get('problem_idx', 0) + 1}"
-                            if mm.get("block_ok") is False and reason != "no_sympy_block":
-                                hard.append(f"{bm}: {reason}")
-                            elif (mm.get("block_ok") is True
-                                  and mm.get("found_in_solution") is False):
-                                hard.append(f"{bm}: {reason}")
-                            elif reason == "no_sympy_block":
-                                advis.append(bm)
-                    except Exception as exc:  # noqa: BLE001 — 격리 실행 장애는 판사에 위임
-                        advis.append(f"(symrun could not run: {exc})")
-                    if hard:
-                        clean_out = out
-                        last_reason = "sympy gate: " + " | ".join(hard)
-                        if attempt < self.grounding_retries:
-                            continue                      # sympy 강조 교정으로 재시도
-                        return mk(clean_out, ok=False,
-                                  note=(f"rejected x{self.grounding_retries + 1}: "
-                                        f"{last_reason}"))
-
-                    if self.problems_verifier is None:
-                        # 판사 미구성: 구조+개념-근거+sympy 통과로 수용
-                        return mk(out, ok=True, note=f"problem set accepted"
-                                                     f" (structure+sympy ok)")
-                    judge_in = out
-                    if advis:
-                        judge_in = (out + "\n\n[SYMRUN-ADVISORY]\nBlocks absent for: "
-                                    + "; ".join(advis)
-                                    + (". Concept-only problems may legitimately omit "
-                                       "code; rule on missing_sympy accordingly."))
-                    v = self.problems_verifier.verify(qtext, chunks, judge_in)
-                    if v.ok and v.grounded:
-                        return mk(out, ok=True,
-                                  note="problem set accepted (struct + sympy + judge ok)",
-                                  judge_role=v.judge_role, codes=v.error_codes)
-                    last_reason = v.human
-                    last_codes = v.error_codes
-                    if attempt < self.grounding_retries:
+                        return self._run_problems_exec(out, qtext, chunks,
+                                                       attempt, mk)
+                    except _ProblemsRetry as sig:
+                        last_reason = sig.reason
                         continue
-                    return mk(out, ok=False,
-                              note=(f"rejected x{self.grounding_retries + 1}: "
-                                    f"{last_reason}"),
-                              judge_role=v.judge_role, codes=last_codes)
 
-                # Tier-2 (판사): 근거·참·오류·예외 — source 강제
+                # Tier-2 (판사): 근거·참·오류·예외 — source 강제 (문제 아님)
                 verdict = self._judge(qtext, chunks, out, role)
                 if verdict.ok and verdict.grounded:
                     if verdict.source == "deferred":
@@ -266,6 +233,82 @@ class Orchestrator:
         except GatewayError as exc:
             return WorkerResult(task=task.id, role=role, url=srv.url, error=str(exc))
         raise RuntimeError("unreachable")  # noqa: B904  (guard)
+
+    def _run_problems_exec(self, out: str, qtext: str, chunks,
+                           attempt: int, mk):
+        """문제 출제 전용 실행-기반 검증. 한 시도의 결과로 WorkerResult 를 반환.
+
+        도크트린(SYMPYMETHOD):
+          - 실행 코드(python/sympy, text 위장 포함)가 없으면 missing_code_block,
+          - 실행 오류는 execution_error,
+          - 코드가 낸 수치와 Solution key 의 값이 불일치하면 value_mismatch —
+            이 셋은 LLM 판사 여부와 무관하게 **하드 거부**.
+          - 실행 통과 후 LLM problems-판사가 있으면 실행 결과를 주입받아 나머지
+            (근거/범위/기타 결함)만 판단. 없으면 실행 게이트 통과로 수용.
+          - 수용 시 <<RESULT>> 플레이스홀더를 실행된 실제 값으로 치환해 반환.
+        """
+        try:
+            from . import symrun
+            gates = symrun.run_gate(out)
+        except Exception as exc:  # noqa: BLE001 — 실행 계층 장애는 수용 불가
+            return mk(out, ok=False,
+                      note=f"rejected: execution layer unavailable ({exc})",
+                      judge_role="", codes=("execution_error",))
+
+        hard = [g for g in gates if g.hard]
+        if hard:
+            details = " | ".join(f"prob {g.idx + 1}: {g.hard}" for g in hard)
+            last_reason = "exec gate: " + details
+            codes = sorted({g.hard_code for g in hard if g.hard_code} or ["missing_code_block"])
+            if attempt < self.grounding_retries:
+                raise _ProblemsRetry(last_reason)   # 남은 재시도로 교정 → continue
+            return mk(out, ok=False,
+                      note=f"rejected x{self.grounding_retries + 1}: {last_reason}",
+                      judge_role="", codes=codes)
+
+        # 실행 게이트 전 문제 통과 → 최종본(placeholder 치환) 준비
+        final_out = out
+        try:
+            final_out = symrun.substitute_results(out)
+        except Exception:  # noqa: BLE001
+            final_out = out
+
+        if self.problems_verifier is None:
+            return mk(final_out, ok=True,
+                      note="problem set accepted (executable gate ok)")
+
+        # LLM problems-판사: 결정론 게이트가 이미 실행·값 일치를 확인했음을
+        # 구조적으로 주입해, 판사는 '코드가 맞는지 추측' 대신 근거/범위/기타만 본다.
+        exec_notes = []
+        for g in gates:
+            if not g.requires:
+                exec_notes.append(f"  prob {g.idx + 1}: concept-only, no exec required")
+            elif g.placeholder_value is not None:
+                v = (int(g.placeholder_value)
+                     if abs(g.placeholder_value - round(g.placeholder_value)) < 1e-9
+                     else f"{g.placeholder_value:.10g}")
+                exec_notes.append(f"  prob {g.idx + 1}: executed OK, final = {v}")
+            else:
+                exec_notes.append(
+                    f"  prob {g.idx + 1}: executed OK, value(s) echo in solution")
+        exec_block = ("\n[EXECUTION-VERIFICATION (machine-run, authoritative)]\n"
+                      + "\n".join(exec_notes)
+                      + "\nCandidate numbers above came from running the author's own "
+                        "sympy/python blocks. Do NOT re-derive them; judge only "
+                        "grounding/soundness/bounds of the explanations and whether "
+                        "any unverified extra numeric claim remains.")
+        v = self.problems_verifier.verify(qtext, chunks, out + exec_block)
+        if v.ok and v.grounded:
+            return mk(final_out, ok=True,
+                      note="problem set accepted (exec gate + judge ok)",
+                      judge_role=v.judge_role, codes=v.error_codes)
+        last_codes = v.error_codes
+        if attempt < self.grounding_retries:
+            raise _ProblemsRetry(v.human or "problems-judge failed")
+        return mk(final_out, ok=False,
+                  note=(f"rejected x{self.grounding_retries + 1}: "
+                        f"{v.human or 'problems-judge failed'}"),
+                  judge_role=v.judge_role, codes=last_codes)
 
     def _judge(self, qtext, chunks, out: str, role: str):
         """Tier-2 평결. verifier 구성 시 다른(엄격한) 모델이 심판. 없으면

@@ -1,171 +1,140 @@
-모델이 문제를 만들 때 **수를 직접 계산하다가 틀리는 문제**를 해결하려면, **"계산은 모델이 아니라 sympy가 한다"**는 원칙을 시스템에 강제로 박아 넣어야 합니다.  
-즉, 문제 생성 에이전트가 답을 만들 때 **자신이 계산하지 않고 sympy 코드를 생성 → sympy가 실행 → 그 출력을 최종 답으로 사용**하는 파이프라인을 구축하는 것입니다.
+이번에 발견된 **"python 펜스 우회"** 사건은 단순한 버그 수정으로 끝날 문제가 아닙니다.  
+이건 **"모델이 만들어낸 코드를 신뢰할 수 있는가"** 에 대한 근본적인 설계 원칙을 다시 세워야 한다는 신호입니다.
+
+지금까지의 접근은 이랬습니다:
+- 모델이 코드를 제출한다.
+- 우리가 그 코드를 실행한다.
+- 실행 결과가 답안과 일치하면 통과.
+
+하지만 이번 사건에서 드러난 것은 **"모델이 코드를 제출하지 않거나, 다른 형식으로 제출하면 검증을 우회할 수 있다"**는 것입니다.  
+즉, "검증을 피해 가는 길"이 존재하면 모델은 그 길을 찾아갑니다.
 
 ---
 
-## 핵심 아이디어: "계산은 도구가, 서술은 모델이"
+## 최고의 전략: "실행 기반 검증(Execution-based Verification)을 유일한 통과 기준으로"
 
-1. **문제 생성 프롬프트**: 모델에게 "답을 계산하지 말고, 계산용 sympy 코드를 만들어라"고 지시.  
-2. **실행 계층**: 생성된 sympy 코드를 로컬에서 실행하여 실제 수치/결과를 얻음.  
-3. **조립**: 그 결과를 문제의 Solution key에 주입하거나, 모델이 결과를 참조하여 최종 답안을 작성.  
-4. **판사**: 답안의 수치가 sympy 재계산 결과와 일치하는지 검증.
+핵심 원칙은 단순합니다.
+
+> **"계산이 필요한 문제는, 실행 가능한 코드를 제출하고, 그 코드의 출력이 답안과 정확히 일치하지 않으면 무조건 거부한다.  
+> 코드가 없거나, 실행 오류가 나거나, 결과가 답과 다르면 LLM 판사에게 묻지도 말고 거부한다."**
+
+이 원칙을 시스템에 박아 넣으면, 모델이 `python` 펜스를 쓰든, `sympy` 펜스를 쓰든, 심지어 `text`로 위장하든 **"실행 가능한 코드 + 정확한 출력"** 이 없으면 통과할 수 없습니다.
 
 ---
 
-## 1. 문제 생성 프롬프트(`problems`)에 추가할 규칙
+## 구체적인 전략 4가지
 
-모델이 "손으로 계산한 값"을 답에 쓰지 못하게 하고, sympy 코드를 의무화합니다.
+### 1. "코드 블록 존재"가 아니라 "코드 블록 실행 성공"만 인정
+
+현재는 `no_sympy_block`이 advisory로 빠져서 LLM 판사가 "그럴듯하다"고 판단하면 통과했습니다.  
+이제는 **블록이 없으면 그 자체로 하드 거부**입니다. (개념 설명 문제 제외)
+
+```python
+# orchestrator gate (의사코드)
+if problem_requires_computation:
+    blocks = extract_all_code_blocks(problem)  # python, sympy 모두
+    if not blocks:
+        return REJECT("missing_code_block")  # advisory 아님, 무조건 거부
+    for block in blocks:
+        result = run_block(block)
+        if not result.ok:
+            return REJECT("execution_error")  # 무조건 거부
+        if not result.value_in_solution:
+            return REJECT("value_mismatch")   # 무조건 거부
+```
+
+> **"개념 설명 문제"** 는 계산이 필요 없으므로 코드 블록을 요구하지 않도록, 문제 생성 단계에서 `requires_computation` 라벨을 명시하게 합니다.
+
+---
+
+### 2. LLM 판사는 "보조"가 아니라 "집행"만
+
+지금까지는 LLM 판사가 "코드가 실행될 것 같다"고 추측했습니다.  
+이제는 **실행 결과를 판사에게 주입**하고, 판사는 그 결과와 답안을 비교하는 역할만 합니다.
+
+```python
+judge_input = {
+    "question": question,
+    "reference": reference,
+    "candidate_answer": candidate_answer,
+    "execution_results": [
+        {"block_id": 1, "output": "32.0", "status": "success"},
+        {"block_id": 2, "output": "1/(2*n**2)", "status": "success"},
+    ]
+}
+```
+
+판사는 더 이상 "코드가 맞는지" 추측하지 않습니다.  
+**이미 실행된 결과**를 보고, "답안의 숫자가 32.0과 일치하는가"만 판단합니다.
+
+---
+
+### 3. 모델에게 "코드 없이 숫자를 쓰면 무조건 실패"라고 못 박기
+
+문제 생성 프롬프트에 다음과 같은 규칙을 추가합니다.
 
 ```yaml
   problems: >
-    SCOPE: you are AUTHORING practice problems, not answering one. Role is
-    PROBLEM-SETTER. You generate 2-4 DISTINCT, rigorously well-posed exercises
-    derivable ONLY from the REFERENCE CONTEXT.
-
+    ...
     ABSOLUTE RULES:
     ...
-    [기존 규칙 유지]
-
-    7. SYMPY-ONLY CALCULATION (Strict):
-       a) For ANY Solution key that requires a numeric result, a definite
-          integral, a root, a limit, a derivative evaluation, or solving a
-          system, you MUST provide a complete, executable sympy snippet that
-          computes the answer.
-       b) You MUST NOT perform the calculation yourself in your head. You MUST
-          NOT write a number that did not come from sympy. If you do, it is a
-          critical error.
-       c) The sympy code must be placed in a fenced block immediately after
-          the Solution key, labeled exactly as:
-          ```sympy
-          from sympy import *
-          ...
-          ```
-       d) The Solution key's final answer MUST be the output of that sympy code.
-       e) If sympy cannot solve the problem, say 'sympy cannot compute this' and
-          do NOT provide a guess or hand-derived number.
-
-    [출력 구조에 sympy 코드 포함]
-    5. STRUCTURE: For each problem, output EXACTLY:
-         PROBLEM N — [concept tag]
-           Question: <clear, self-contained text. LaTeX for math>
-           Solution key: <deterministic steps matching source. Explicit final answer>
-           Sympy verification: <executable sympy code that produces the final answer>
-           Difficulty: easy|medium|hard
-           Source anchor: <chapter/section/theorem used, verbatim or exact ref>
+    10. MANDATORY EXECUTABLE VERIFICATION:
+       a) ANY problem whose Solution key contains a numeric value, definite
+          integral, derivative, root, limit, or algebraic result MUST include
+          an executable code block (sympy or python) that computes that exact
+          value.
+       b) The code block MUST be complete, import all needed symbols, and
+          assign the final result to a variable named `result`.
+       c) The textual Solution key MUST state the value as `<<RESULT>>` and
+          the system will replace it with the executed output.
+       d) If you cannot provide such a code block, the problem is INVALID.
+          Do not output it.
+       e) If you write a number that did not come from an executed code block,
+          the entire problem set will be REJECTED.
 ```
+
+이제 모델은 **"코드 없이 숫자를 쓰는 행위"** 자체가 금지됩니다.
 
 ---
 
-## 2. 오케스트레이터에 "sympy 실행 계층" 추가
+### 4. 회귀 테스트를 통한 지속적 방어
 
-파이프라인에서 문제 생성 후, `Sympy verification` 블록을 실제로 실행합니다.
+이번에 `python` 펜스 우회를 잡았지만, 다음에는 `text` 블록이나 다른 형식으로 우회할 수 있습니다.  
+따라서 **실행 기반 검증을 우회하려는 모든 시도를 테스트 케이스로** 만들어야 합니다.
 
 ```python
-# agent/orchestrator.py (개념 코드)
-import sympy as sp
-import re
-import json
-
-def extract_sympy_code(problem_text: str) -> str:
-    """문제 텍스트에서 ```sympy ... ``` 블록 추출"""
-    match = re.search(r"```sympy\n(.*?)```", problem_text, re.DOTALL)
-    if not match:
-        return None
-    return match.group(1).strip()
-
-def run_sympy(code: str):
-    """sympy 코드를 안전하게 실행하고 결과를 문자열로 반환"""
-    try:
-        # sympy 실행은 신뢰할 수 있는 환경에서만 (샌드박스 권장)
-        local_ns = {}
-        exec(code, {"sympy": sp}, local_ns)
-        # 결과는 보통 마지막 표현식 또는 변수에 저장됨
-        # 사용자 코드에 따라 result 변수를 강제하도록 프롬프트에서 지정
-        return local_ns.get("result", "No result variable found")
-    except Exception as e:
-        return f"Sympy execution failed: {e}"
-
-def verify_problem_with_sympy(problem_text: str) -> bool:
-    code = extract_sympy_code(problem_text)
-    if code is None:
-        return False  # sympy 코드가 없으면 실패
-    output = run_sympy(code)
-    # 모델이 제시한 답과 sympy output 비교 (문자열 또는 수치 비교)
-    # 이 부분은 정규식으로 모델의 "Final answer:" 부분과 output을 비교
-    return True  # 일치하면 통과
+def test_reject_python_fence_bypass():
+    problem = """
+    Solution key: The answer is 32.
+    ```python
+    from sympy import symbols, integrate, oo
+    n = symbols('n')
+    integrate(1/x**3, (x, n, oo))  # NameError
+    ```
+    """
+    verdict = run_problems_gate(problem)
+    assert verdict.ok == False
+    assert "execution_error" in verdict.error_codes
 ```
 
-**프롬프트에서 강제할 사항**: sympy 코드는 반드시 `result = ...` 형태로 최종 결과를 `result` 변수에 저장하도록 지시해야 합니다. 그래야 실행 계층이 그 값을 가져올 수 있습니다.
+이런 테스트를 계속 추가하면, 새로운 우회가 발견될 때마다 시스템이 스스로 방어할 수 있습니다.
 
 ---
 
-## 3. 판사(`JUDGE_PROBLEMS`)에 sympy 검증 추가
+## 결론: "실행 없이는 통과 없다"
 
-판사는 이제 모델이 준 sympy 코드가 실제로 그 답을 내는지 확인합니다.  
-또한 모델이 손으로 계산한 틀린 숫자를 적었을 때 잡아냅니다.
+이번 사건이 준 교훈은 분명합니다.
 
-```python
-JUDGE_PROBLEMS = _prompts.fetch_text("judge.problems", default=(
-    "You are a STRICT PROBLEM SET QUALITY judge. You are given the REQUEST, "
-    "the REFERENCE CONTEXT (trusted source), and a CANDIDATE problem set authored "
-    "by another model.\n"
-    "You must act as a deterministic gatekeeper. Source is absolute authority. "
-    "Reject anything that is not perfectly grounded in the source or is "
-    "internally ill-posed.\n\n"
-    "Judge the set on the following axes. If ANY check fails, set ok=false.\n"
-    "... [기존 1~6 규칙 유지] ...\n"
-    "7) SYMPY VERIFICATION (Critical):\n"
-    "   - Does every Solution key that involves a numeric result include an "
-    "     executable sympy block? If not -> error_code: missing_sympy.\n"
-    "   - The sympy block MUST be the source of the final numeric answer. "
-    "     If the Solution key states a numeric value and that value did NOT come "
-    "     from the sympy block (or differs from sympy output), classify it as "
-    "     'hand_calculation_error' and reject.\n"
-    "   - If sympy cannot compute the answer, the solution must say "
-    "     'sympy cannot compute this'. A hand-derived guess is not acceptable.\n"
-    "   - Re-run the sympy code mentally or note the expected structure: the "
-    "     code must be complete and directly executable (import sympy, define "
-    "     variables, compute result). Any syntax error or missing import is "
-    "     a rejection.\n"
-    "New numbers chosen by the author are ALLOWED only if sympy verifies them.\n"
-    "Return ONLY a strict JSON object: "
-    "{\"ok\": bool, \"grounded\": bool, \"errors\":[string], "
-    "\"error_codes\":[string], \"exceptions\":[string], \"reason\":string}.\n"
-    "error_codes MUST be one or more of: source_violation, meta_question, "
-    "indefinite_solution, bound_collapse, logic_error, structural_missing, "
-    "missing_sympy, hand_calculation_error, other. "
-    "Set ok=false on ANY violation."
-))
-```
+> **LLM은 말로는 그럴듯한 코드를 만들 수 있지만, 실제로 실행되지 않는 코드를 만들 수도 있다.  
+> 따라서 "실행"이 유일한 검증 수단이 되어야 한다.**
 
----
+최고의 전략은:
 
-## 4. 전체 파이프라인 요약
+1. **코드 블록 없음 → 무조건 거부**
+2. **코드 실행 오류 → 무조건 거부**
+3. **코드 출력과 답안 불일치 → 무조건 거부**
+4. **LLM 판사는 실행 결과를 받아 "일치 여부"만 확인**
 
-```
-[문제 생성 에이전트]
-   ↓ (문제 초안 + sympy 코드 생성)
-[심파이 실행 계층]  ← 실제 sympy로 계산
-   ↓ (계산 결과 획득)
-[문제 최종 조립]  (모델이 결과를 반영)
-   ↓
-[판사]  (sympy 코드 존재, 계산 일치, 소스 준수 검사)
-   ↓
-사용자에게 전달
-```
+이 4가지를 시스템의 핵심 원칙으로 삼으면, 모델이 어떤 방식으로든 "계산 안 하고 그럴듯한 숫자"를 쓰는 것을 원천 차단할 수 있습니다.  
 
-이 구조가 되면, 모델이 **자기 머리로 암산한 잘못된 숫자를 답에 쓸 수 없습니다.**  
-왜냐하면 답은 반드시 sympy 실행 결과와 일치해야 하기 때문입니다.
-
----
-
-## 5. 주의할 점
-
-- **sympy 실행 보안**: 생성된 코드를 그대로 `exec`로 실행하는 것은 위험할 수 있습니다.  
-  개발 단계에서는 괜찮지만, 운영에서는 샌드박스(Docker 등)를 반드시 고려해야 합니다.
-- **모델이 sympy 코드를 잘못 생성**할 수 있습니다. 이 경우 "sympy 실행 실패"가 되어 판사가 거부하게 됩니다.  
-  이는 오히려 좋은 현상입니다. 잘못된 계산이 통과되지 않으니까요.
-- **계산이 필요 없는 문제**(개념 설명 등)는 sympy를 요구하지 않도록 판사가 유연하게 판단해야 합니다.  
-  프롬프트에서 "numeric result가 있을 때만"이라고 명시했으므로 괜찮습니다.
-
-이렇게 하면 "수치 계산 오류"가 시스템에서 원천적으로 차단됩니다.
+원하시면, 이 전략을 반영한 `orchestrator.py`와 `judge.problems` 프롬프트의 구체적인 수정안을 바로 만들어 드리겠습니다.
