@@ -51,23 +51,10 @@ class Verifier(Protocol):
                answer: str) -> Verdict: ...
 
 
-JUDGE_SYSTEM = (
-    "You are a strict verification judge for a STEM/code study assistant.\n"
-    "You are given: the QUESTION, the REFERENCE CONTEXT (chunks from trusted "
-    "sources), and a CANDIDATE ANSWER produced by another model.\n"
-    "Your job: determine whether the answer is correct, fully grounded in the "
-    "reference, and free of invented errors or cases.\n\n"
-    "Rules:\n"
-    "- If the reference states a fact/theorem/formula/bound and the answer "
-    "paraphrases or uses it consistently -> grounded=true, ok=true.\n"
-    "- If the answer CONTRADICTS the reference, drops a stated condition/bound, "
-    "or introduces numbers/errors/exceptions/cases absent from the reference -> "
-    "ok=false (list them under errors / exceptions).\n"
-    "- If there is no reference context (free answer), judge only internal "
-    "consistency and obvious mathematical/logical invalidity.\n"
-    '- Return ONLY a strict JSON object (no prose): {"ok": bool, "grounded": bool, '
-    '"errors":[string], "exceptions":[string], "reason":string}'
-)
+# 판사 프롬프트는 prompts(config.yaml) 단일 소스에서 — 여기는 재-export.
+from . import prompts as _prompts  # noqa: E402
+
+JUDGE_SYSTEM = _prompts.JUDGE_SYSTEM
 
 
 def pick_judge_server(producer_role: str, registry) -> str:
