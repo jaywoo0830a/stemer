@@ -146,9 +146,32 @@ scope:
          PROBLEM N — [concept tag]
            Question: <clear, self-contained text. LaTeX for math>
            Solution key: <deterministic steps matching source. Explicit final answer>
+           Sympy verification: <executable ```sympy code``` that produces that answer>
            Difficulty: easy|medium|hard
            Source anchor: <chapter/section/theorem used, verbatim or exact ref>
        Separate problems by a blank line.
+    7. SYMPY-ONLY CALCULATION (Strict):
+       a) If a Solution key needs ANY numeric result (a value, a count n, a
+          definite integral, a root, a sum/partial sum, a comparison test
+          bound being < a epsilon), you MUST also give, immediately after that
+          Solution key, a complete, directly executable ```sympy``` code block
+          that computes that final number/answer.
+       b) You MUST NOT compute the number yourself in your head. Never write a
+          final number that does not match what your ```sympy``` block prints.
+          If the sympy block and your Solution key's printed final value ever
+          disagree, it is a critical 'hand-calculation error'.
+       c) The sympy block must end by printing (or assigning to `answer`/`result`
+          and printing) the final numeric answer, e.g.:
+          ```sympy
+          from sympy import *
+          n = ceiling(sqrt(1/(2*Rational(1,2000))))
+          answer = n
+          print(answer)
+          ```
+       d) Concept/theorem-only problems (no numbers to compute) need NO sympy
+          block — omit it there.
+       e) If sympy genuinely cannot compute the value, write
+          '(sympy cannot compute this)' instead of a hand-guessed number.
     6. SELF-CHECK BEFORE OUTPUT:
        a) Is every single theorem/fact used in my Question and Solution key 
           verbatim or trivially derivable from the REFERENCE CONTEXT?
@@ -156,7 +179,9 @@ scope:
           (If not, I must fix it before outputting).
        c) Did I check all inequalities and bounds for logical consistency 
           (no collapsed bounds, no inverted indices)?
-       d) Is my difficulty label justified by the number of source-method steps
+       d) For every numeric Solution key, does an executable ```sympy``` block 
+          follow that prints MY final answer exactly? (If not, I must add it.)
+       e) Is my difficulty label justified by the number of source-method steps
           required (easy=1 direct step, medium=2 steps, hard=multi-step/edge case)?
 
 judge:
@@ -213,11 +238,31 @@ judge:
       key collapses the two sides to one number/limit, treat it as inconsistent.
     - New numbers the author chose are allowed; do not reject merely for differing
       from an example in the source.
+    - SYMPY VERIFICATION (Critical): For each problem, if its Solution key ends in a
+      concrete numeric value/count/result that had to be computed, check that an
+      executable ```sympy``` block immediately follows that actually produces that
+      number:
+        * Missing executable sympy code for a numeric-answer problem ->
+          error_code: missing_sympy.
+        * The Solution key's final number does not match what its sympy code would
+          compute -> error_code: hand_calculation_error (the classic arithmetic or
+          index slip; NEVER let a hand-derived number stand).
+        * The sympy code has a syntax/exec error or typo (not directly runnable by
+          `python -c "from sympy import *; ...`-style execution) -> treat as a
+          broken verification and reject (hand_calculation_error or other).
+      Concept/theorem-only problems with no numeric endpoint need no sympy block;
+      do not falsely require one there. A '[SYMRUN-ADVISORY]' note in the candidate
+      may list problems lacking a block — your job is ONLY to enforce missing_sympy
+      for the ones that actually need numerics.
     Return ONLY a strict JSON object (no prose):
     {"ok": bool, "grounded": bool, "errors":[string], "error_codes":[string],
      "exceptions":[string], "reason":string}
+    error_codes one or more of: source_violation, meta_question, extra_claim,
+    indefinite_solution, bound_collapse, logic_error, structural_missing,
+    missing_sympy, hand_calculation_error, other.
     ok=false on any of: meta-only, unsolvable-from-source, no definite answer,
-    internally-inconsistent bound.
+    internally-inconsistent bound, missing_sympy (for numeric problems),
+    hand_calculation_error.
 
 parser:
   system: >

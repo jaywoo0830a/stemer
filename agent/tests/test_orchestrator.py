@@ -268,4 +268,65 @@ def test_problems_action_failed_by_problems_judge():
     assert "extra_claim" in res[0].grounding_note
 
 
+# --- SYMPY 실행 계층(SYMPYMETHOD) 게이트: 손계산 드리프트 결정론 차단 ----
+_NUMERIC_CLEAN = """PROBLEM 1 — [Remainder Estimate]
+Question: For Σ 1/k^3 use R_n ≤ 1/(2 n^2); find the smallest n so the error < 0.0005.
+Solution key: require 1/(2 n^2) < 0.0005 → n > sqrt(1000) ≈ 31.6, round up → 32.
+```sympy
+from sympy import *
+n = ceiling(sqrt(1/(2*Rational(1,2000))))
+answer = n
+print(answer)
+```
+Difficulty: medium
+"""
+
+_NUMERIC_DRIFT = _NUMERIC_CLEAN.replace("→ 32.", "→ 45.")
+
+
+def _problems_transport(payload: str):
+    class ProbTransport(FakeTransport):
+        def post_text(self, url, body, timeout):
+            return {"choices": [{"message": {"role": "assistant",
+                                             "content": payload}}]}
+    return ProbTransport
+
+
+def test_sympy_gate_accepts_clean_numeric_problem():
+    """sympy 가 낸 수치(32)를 Solution key 가 그대로 쓰면 통과."""
+    from agent.rag import Chunk as _C2
+    reg = Registry()
+    orch = Orchestrator(
+        registry=reg,
+        rag=_StubRag([_C2(source="calc", section="11.3",
+                          text="Integral Test Remainder Estimate n and n+1 bounds.")]),
+        gateway_factory=lambda url, role: Gateway(
+            base_url=url, transport=_problems_transport(_NUMERIC_CLEAN)()))
+    res, _ = orch.run_tasks(
+        [Task(id=1, action="problems",
+              input="make a problem needing a smallest-n", role="worker")],
+        write=False)
+    assert res[0].ok and res[0].grounded is True
+    assert "sympy" in res[0].grounding_note
+
+
+def test_sympy_gate_rejects_hand_calculation_drift():
+    """Solution key 는 45라 적었는데 sympy 가 32를 낸다 → 판사 없이도 결정론 거부."""
+    from agent.rag import Chunk as _C2
+    reg = Registry()
+    orch = Orchestrator(
+        registry=reg,
+        rag=_StubRag([_C2(source="calc", section="11.3",
+                          text="Integral Test Remainder Estimate.")]),
+        grounding_retries=0,          # 재시도 없이 즉시 거부
+        gateway_factory=lambda url, role: Gateway(
+            base_url=url, transport=_problems_transport(_NUMERIC_DRIFT)()))
+    res, _ = orch.run_tasks(
+        [Task(id=1, action="problems", input="make a problem", role="worker")],
+        write=False)
+    assert res[0].grounded is False
+    assert "sympy gate" in res[0].grounding_note
+    assert "hand-calc drift" in res[0].grounding_note or "32" in res[0].grounding_note
+
+
 

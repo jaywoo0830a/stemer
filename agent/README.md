@@ -103,6 +103,9 @@ agent/
   rag.py       KeywordRetriever / StudyStoreRetriever(study_lib store) / CodeIndex(§4.2 뼈대)
   prompts.py   역할별 system + 근거 인용(ctx block) + merge_results(markdown)
   grounding.py  Tier-1 무료 게이트 (모듈 일반 규칙: 빈 답/완전 drift 차단, 교정 프롬프트)
+  symrun.py     [SYMPYMETHOD] 결정론 수치 게이트 — 출제자가 낸 ```sympy``` 블록을
+                샌드박스 exec 로 실제 실행해, 손계산 드리프트(예: 45 vs 32)를 차단.
+                실행 오류/코드 결과값과 Solution key 불일치 = 자동 거부. (sympy 필요)
   verify.py     Tier-2 LLM 판사 — 논리적 모델(기본 reasoner 8088; 생산자가 reasoner면 coder)
                 로 답의 참/거짓·오류·예외를 구조화 JSON 평결. self-confirmation 방지.
   orchestrator.py  Orchestrator(run_plan/run_tasks, ThreadPool 병렬, WorkerResult,

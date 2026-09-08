@@ -191,14 +191,49 @@ class Orchestrator:
 
                 # 출제(problems)
                 if is_problems:
+                    # 결정론 sympy 게이트 (SYMPYMETHOD): 블록이 깨졌거나(실행 오류)
+                    # 코드가 실제로 낸 수치를 Solution key 가 안 쓰면 = 손계산 드리프트.
+                    # (개념만 묻는 문제는 코드를 안 쓸 수 있어서 그 자체로는 거부 안 함
+                    #  → missing_sympy 판단은 아래 LLM problems-judge 에 위임)
+                    from . import symrun
+                    hard = []
+                    advis = []
+                    try:
+                        for mm in symrun.count_mismatches(out):
+                            reason = mm.get("reason") or ""
+                            bm = f"problem {mm.get('problem_idx', 0) + 1}"
+                            if mm.get("block_ok") is False and reason != "no_sympy_block":
+                                hard.append(f"{bm}: {reason}")
+                            elif (mm.get("block_ok") is True
+                                  and mm.get("found_in_solution") is False):
+                                hard.append(f"{bm}: {reason}")
+                            elif reason == "no_sympy_block":
+                                advis.append(bm)
+                    except Exception as exc:  # noqa: BLE001 — 격리 실행 장애는 판사에 위임
+                        advis.append(f"(symrun could not run: {exc})")
+                    if hard:
+                        clean_out = out
+                        last_reason = "sympy gate: " + " | ".join(hard)
+                        if attempt < self.grounding_retries:
+                            continue                      # sympy 강조 교정으로 재시도
+                        return mk(clean_out, ok=False,
+                                  note=(f"rejected x{self.grounding_retries + 1}: "
+                                        f"{last_reason}"))
+
                     if self.problems_verifier is None:
-                        # 판사 미구성: 구조+개념-근거 통과로 수용 (답-인용 판사는 안 격)
+                        # 판사 미구성: 구조+개념-근거+sympy 통과로 수용
                         return mk(out, ok=True, note=f"problem set accepted"
-                                                     f" (structure ok)")
-                    v = self.problems_verifier.verify(qtext, chunks, out)
+                                                     f" (structure+sympy ok)")
+                    judge_in = out
+                    if advis:
+                        judge_in = (out + "\n\n[SYMRUN-ADVISORY]\nBlocks absent for: "
+                                    + "; ".join(advis)
+                                    + (". Concept-only problems may legitimately omit "
+                                       "code; rule on missing_sympy accordingly."))
+                    v = self.problems_verifier.verify(qtext, chunks, judge_in)
                     if v.ok and v.grounded:
                         return mk(out, ok=True,
-                                  note="problem set accepted (struct + problems-judge ok)",
+                                  note="problem set accepted (struct + sympy + judge ok)",
                                   judge_role=v.judge_role, codes=v.error_codes)
                     last_reason = v.human
                     last_codes = v.error_codes

@@ -7,3 +7,6 @@ httpx>=0.27
 # rag StudyStoreRetriever 로 study store + ollama 임베딩을 쓰는 경우
 # yaml 로 registry 설정(agent/config/agent.yaml)을 읽는 경우(선택)
 pyyaml>=6.0
+# SYMPYMETHOD 수치 실행 계층(agent/symrun.py): 모델이 낸 ```sympy``` 블록 로컬 실행.
+# 이게 없으면 출제(problems)의 결정론 수치 게이트가 제 기능을 못 함(advisory 로 하락).
+sympy>=1.10
