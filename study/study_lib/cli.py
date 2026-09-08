@@ -501,8 +501,15 @@ def _generate_free(ws: Workspace, args) -> int:
             continue
         passages = pack_passages(all_texts, in_budget,
                                  count_tokens=llm.count_tokens)
+        rag_tok = sum(max(1, (len(t) + 2) // 3) for t in passages)  # RAG 입력 추정
+        try:
+            real_in = llm.count_tokens("\n\n".join(passages)) if passages else 0
+            rag_tok = real_in
+        except Exception:  # noqa: BLE001 — 서버 토크나이저 없으면 추정 유지
+            pass
         print(f"[{now()}] [{topic.topic_id}] start parts={parts} "
-              f"passages {len(all_texts)}→{len(passages)}", flush=True)
+              f"passages {len(all_texts)}→{len(passages)}, rag_in≈{rag_tok}t",
+              flush=True)
         try:
             note = run_free_parts(topic, llm, passages, ws.notes, parts=parts)
             # 정직성: 요청한 part 파일이 이번 실행에서 진짜 갱신(새로 생성/재작성)

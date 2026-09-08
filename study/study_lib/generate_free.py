@@ -419,8 +419,9 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
     for part in parts:
         sysp = _part_system(part)
         sub = passages_for_part(part, passages)   # 권고안 B: part 전용 passage
+        rag_tok = sum(estimate_tokens(p) for p in sub)   # RAG 입력 토큰(추정, ~char/3)
         print(f"[free:{part}] generating {topic.topic_id} "
-              f"(passages {len(passages)}→{len(sub)}, "
+              f"(passages {len(passages)}→{len(sub)}, rag_in≈{rag_tok}t, "
               f"max_tokens={_PART_MAX.get(part, 8000)})...", flush=True)
         try:
             body = _gen_part_body(topic, llm, part, sysp, sub)
