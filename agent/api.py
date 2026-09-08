@@ -51,7 +51,7 @@ class RunPlanRequest(SplitPlanRequest):
     note_stem: Optional[str] = Field(
         None, description="결과 파일 stem (없으면 시각 자동 생성)")
     rag: Optional[str] = Field(
-        None, description="'book-store' | 'code' | None (기본 근거 없음)")
+        None, description="'book-store' | 'store' | 'code' | None (근거 없음)")
     use_parser: bool = Field(
         True, description="True면 parser(8081)로 티켓 정규화, False면 로컬 split")
 
@@ -244,6 +244,15 @@ def _make_rag_from_name(name: str, reg: Registry, live: bool):
     if not live:
         return None
     if name == "book-store":
+        from .rag import StudyStoreRetriever
+        try:
+            embed = reg.role("embed")
+            return StudyStoreRetriever.load(
+                store_dir=None, embed_base=embed.base_url,
+                embed_model=(embed.model or "qwen2.5:3b"))
+        except Exception:  # noqa: BLE001
+            return None
+    if name in ("store", "rag-store", "book"):   # 'store' 별칭 → 책 store 에 근거
         from .rag import StudyStoreRetriever
         try:
             embed = reg.role("embed")

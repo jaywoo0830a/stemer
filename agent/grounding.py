@@ -158,9 +158,6 @@ def problems_ok(question: str, chunks: Sequence[Chunk], answer: str) -> tuple[bo
     text = (answer or "").strip()
     if empty_or_too_short(answer):
         return False, "answer empty or too short for problems"
-    if _META.search(text):
-        return False, ("output writes 'Formulate/make/students must …' (meta) "
-                       "instead of concrete exercises")
     blocks = _split_problem_blocks(text)
     if not blocks:
         return False, "no concrete problem blocks found"
@@ -173,8 +170,12 @@ def problems_ok(question: str, chunks: Sequence[Chunk], answer: str) -> tuple[bo
     # 각 블록이 "실행/대상 질문 + 해답" 을 갖는지
     for b in blocks:
         bl = b.lower()
-        if _META.search(b):
-            return False, "a block is a meta prompt, not a concrete problem"
+        # meta-명령("students must formulate") 이면서 실제 해답(Solution)이 없으면
+        # 그 블록은 템플릿 지시 → meta 거부 (단, 실제 PROBLEM 블록엔 Solution 이
+        # 있어 아래 META 검사에 안 걸림 — 도입부 meta 는 블록 밖으로 무시).
+        if _META.search(b) and not _SOLUTION_OK.search(b):
+            return False, ("a block is a meta prompt ('Formulate/students must …') "
+                           "with no concrete Solution key")
         has_ask = ("question" in bl) or ("?" in b) or (":" in b)
         has_answer = bool(_SOLUTION_OK.search(b))
         concreteness = bool(_NUM.search(b) or _IMPERATIVE.search(b))
