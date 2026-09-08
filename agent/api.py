@@ -131,6 +131,7 @@ def create_app(
             "roles": {name: list(r.urls) for name, r in reg.roles().items()},
             "note_dir": note_dir,
             "rag_connected": rag is not None,
+            "store": _store_diagnostics(),
         }
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -160,6 +161,18 @@ def create_app(
 # --------------------------------------------------------------------------- #
 # 헬퍼 / mock / html
 # --------------------------------------------------------------------------- #
+def _store_diagnostics() -> Dict[str, Any]:
+    """book-store 가 붙을 store 의 청크 현황(진단). study_lib 없으면 None."""
+    try:
+        from .rag import describe_store
+        v = describe_store()
+        if v is None:
+            return {"available": False, "reason": "store non-empty? unable to load", "stats": None}
+        return {"available": True, "stats": v}
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "reason": str(exc), "stats": None}
+
+
 def _run_sync(orch: Orchestrator, plan: str, stem: Optional[str]):
     results, path = orch.run_plan(plan, note_stem=stem, write=True)
     return results, path, (path.stem if path else (stem or "plan"))

@@ -164,6 +164,37 @@ def _import_study_lib() -> None:
     # 이미 sys.path 에 없으면 경고 없이 StudyStoreRetriever 가 런타임에 잡아준다.
 
 
+def describe_store(store_dir: Optional[str] = None) -> Optional[dict]:
+    """로드되는 book-store 청크 현황을 best-effort 로 반환 (진단/health 용).
+
+    반환: {"dir":str, "books":[str], "chunks":int, "by_book":{str:int}}
+    store_dir 미지정 → env STEMER_STORE(없으면 기본). study_lib/store 없거나 읽기
+    실패하면 None(코드 경로 오류가 아닌 '비었음/없음' 을 구분 못 하나, 어쨌든 0 로드).
+    """
+    try:
+        _import_study_lib()
+        from study_lib.store import IndexStore, JsonDurableSink
+        sink_dir = store_dir or _default_store_dir_env()
+        sink = JsonDurableSink(sink_dir)
+        store = IndexStore(sink)
+        n = store.load_all()
+        stats = store.stats()
+        return {
+            "dir": str(sink_dir),
+            "books": sorted(stats.by_book.keys()),
+            "chunks": int(stats.chunks),
+            "by_book": {k: int(v) for k, v in stats.by_book.items()},
+            "loaded": int(n),
+        }
+    except Exception as exc:  # noqa: BLE001 — 진단용이라 실패는 None(비었음으로 간주)
+        return None
+
+
+def _default_store_dir_env() -> Path:
+    repo = Path(__file__).resolve().parents[1]
+    return Path(os.environ.get("STEMER_STORE") or repo / "study" / "data" / "store")
+
+
 # --------------------------------------------------------------------------- #
 # 코드 인덱스 뼈대 (NEW-METHOD §4.2) — 실제 인덱싱/그래프는 후속 작업.
 # --------------------------------------------------------------------------- #

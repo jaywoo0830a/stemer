@@ -19,14 +19,15 @@ services:
     volumes:
       # 결과 notes 영속 (호스트 ./agent-notes)
       - ./agent-notes:/app/notes
-      # (선택) 텍스트 RAG 근거 store — 호스트 study/data/store 를 꽂으려면 활성화:
-      # - ./study/data/store:/data/store
+      # (RAG) 책 청크 store — 기본은 호스트 ./study/data/store 를 /app/store 로 마운트.
+      # 실제 store(서버 /data/store 또는 calc.jsonl 폴더)가 다르면 아래와
+      # STEMER_STORE 를 실경로로 맞춘다.
+      - ./study/data/store:/app/store
     environment:
       # live(실제 llama/Ollama) | mock(오프라인 echo 데모)
       AGENT_MODE: ${AGENT_MODE:-live}
       # role 주소 기본값은 agent/registry.py (127.0.0.1:8081-8088). 필요 시 오버라이드:
       # AGENT_PARSER / AGENT_WORKERS / AGENT_CODERS / AGENT_REASONER / AGENT_EMBED(CSV)
-      # AGENT_EMBED: ${AGENT_EMBED:-http://127.0.0.1:11434}
-      # study store 경로(book-store rag 요청 시 사용)
-      STEMER_STORE: ${STEMER_STORE:-}
+      # book-store RAG 가 근거를 로드할 store 경로 (위 마운트 기준)
+      STEMER_STORE: ${STEMER_STORE:-/app/store}
     ports: []                 # host network 라 포트 매핑 불필요
