@@ -135,7 +135,7 @@ class LocalClient:
         mt = max_tokens
         raw = ""
         for _ in range(3):
-            raw = (self._chat(system, user, mt) or "").strip()
+            raw = strip_thinking(self._chat(system, user, mt) or "").strip()
             if raw:
                 if not json_object:
                     return LLMResult(content=raw, usage=Usage())
@@ -149,6 +149,26 @@ class LocalClient:
                     ) from None
             mt = mt + 2048   # reasoning 만 다 쓴 것 → 소폭 예산 확대
         raise LLMError("local model returned empty content (0/3)" + _tail(raw))
+
+
+_THINK_RE = re.compile(r"<think>\s*</think>|<think>.*?</think>", re.DOTALL)
+
+
+def strip_thinking(text: str) -> str:
+    """llama-server(Phi-4 등)가 content 에 태그로 던진 <think>…</think> 를 제거한다.
+
+    - Phi-4-mini-reasoning 은 (chat transport) 최종 본문 앞에 <think>\n…\n</think> 를
+      content 로 그대로 포함하므로 잘라야 한다(권고안.md).
+    - 앞/중간/여러 개 겹침·빈 think 모두 제거 후 남은 본문의 공백만 정리.
+    """
+    if not text:
+        return text
+    prev = None
+    t = text
+    while prev != t:          # 겹침/중첩 대비 반복 제거
+        prev = t
+        t = _THINK_RE.sub("", t)
+    return t.strip()
 
 
 def _head(raw: str, n: int = 200) -> str:

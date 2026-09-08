@@ -45,6 +45,31 @@ def test_parse_json_raises_on_empty_or_nonobject():
         _parse_json("[1,2]")          # dict 아님
 
 
+def test_strip_thinking_removes_think_blocks():
+    from study_lib.llm_local import strip_thinking
+    assert strip_thinking("<think>let me solve</think>391.") == "391."
+    assert strip_thinking(
+        "<think>\nI need to compute\n</think>The delta is x.") == "The delta is x."
+    assert strip_thinking("No think here.") == "No think here."
+    # 겹침 / 앞뒤 이중 think / 빈 think 모두 제거
+    assert strip_thinking("<think></think>fin start<think>skip</think> end.") \
+        == "fin start end."
+    assert strip_thinking("") == ""
+
+
+def test_complete_free_strips_think_before_return(monkeypatch):
+    """Phi-4 가 chat content 에 <think>…</think> 를 포함해 뱉어도 본문만 남긴다."""
+    c = LocalClient()
+    monkeypatch.setattr(
+        c, "_chat",
+        lambda system, user, max_tokens:
+        ("<think>Okay solve prime x squared.</think>"
+         "## Reading the Topic\\n\\nThe value is $x^2$."))
+    res = c.complete(system="s", user="u", json_object=False)
+    assert res.content.startswith("## ")
+    assert "<think>" not in res.content and "</think>" not in res.content
+
+
 def test_local_client_complete_returns_dict(monkeypatch):
     c = LocalClient()
     monkeypatch.setattr(c, "_chat",
