@@ -114,31 +114,91 @@ def numeric_anchor_check(question: str, chunks: Sequence[Chunk],
                    f"worked value(s) {_uniq(anchors)}")
 
 
-# --- 출제(문제 만들기) 구조 검증 (결정론) — 답-인용 게이트와 다른 역할 ------
-_PROBLEM_HDR = re.compile(r"(?m)^\s*(?:##\s*Problem\b|###? Problem\b|PROBLEM\s*\d|"
-                          r"Q[1-9]?\.?\s|Question\s*[0-9:]+|문제\s*[0-9]*\s*[:：]?)",
+# --- 출제(문제 만들기) 구조 검증 v2 (결정론·엄격) -------------------------------
+# 개별 문제 블록을 실제 표기로 분리하고, 각 블록이
+#   Question(명령·수치 대상) + Solution/Answer(해법) + Difficulty  를 구조로
+#   갖는지 강제. "(students must) Formulate a problem ..." 류 meta 지시를 거부.
+_PROB_SPLIT = re.compile(r"(?m)^\s*(?=(?:PROBLEM\s*\d+|#+\s*Problem\b|"
+                         r"문제\s*\d+|Question\s+[0-9]+|Problem\s*[0-9]+|[0-9]+[.)]))")
+_SOLUTION_OK = re.compile(r"(Solution key|Solution:|Answer[:：]|답:|풀이:|Key:)",
                           re.IGNORECASE)
-_SOLUTION_MARK = re.compile(r"(solution|풀이|답|answer|key|sol\.?\s*[:：]|Solution key)",
-                            re.IGNORECASE)
+_IMPERATIVE = re.compile(
+    r"(find|compute|evaluate|show that|prove|decide|test|determine|solve|check|"
+    r"is it|converge|classify|which n|how many|for what)",
+    re.IGNORECASE)
+_META = re.compile(
+    r"(?:formulate|design|make up|make|create|construct|invent)\s+(?:\w+\s+)?"
+    r"(?:problem|exercise|question|example|task)\b|"
+    r"students?\s+must", re.IGNORECASE)
+_REQ_VERBS = ("find", "compute", "evaluate", "show", "prove", "decide", "determine",
+              "solve", "classify", "converge")
+
+
+def _split_problem_blocks(text: str) -> list[str]:
+    """문제 블록들을 자른다. 경계는 번호/헤더 시작. (0이면 전체로 취급)"""
+    starts = [m.start() for m in _PROB_SPLIT.finditer(text)]
+    if not starts:
+        return [text] if text.strip() else []
+    blocks = []
+    for i, s in enumerate(starts):
+        e = starts[i + 1] if i + 1 < len(starts) else len(text)
+        blocks.append(text[s:e].strip())
+    return [b for b in blocks if b]
 
 
 def problems_ok(question: str, chunks: Sequence[Chunk], answer: str) -> tuple[bool, str]:
-    """생성형 결과가 최소 1+ 문제 + 각각 해법/앵커를 갖는지 (구조 최소)."""
+    """엄격 구조 검증:
+      1) 빈/짧음;
+      2) meta-서술 포기(reject 하는 "Formulate ..."형) 없음;
+      3) 실제 문제 블록 >= req(요청 개수 default 1, "two"같이 지정 시 반영);
+         각 블록은 Question 대상 + Solution/Answer + Difficulty*;
+      4) 문제 개념이 source 랑 어휘/메서드로 엉켰는지(leak 방지).
+    *Difficulty 는 '권장 구조' — 여러 해답 문구가 오면 유연하게(임의 금지) 요구하지 않음.
+    """
     text = (answer or "").strip()
     if empty_or_too_short(answer):
         return False, "answer empty or too short for problems"
-    # 문제 헤더 갯수 (동일 문제 여러 단락도 충분히 감지)
-    n_prob = len(list(_PROBLEM_HDR.finditer(text))) or (1 if "question" in text.lower()
-                                                        or "문제" in text else 0)
-    if n_prob < 1:
-        return False, "no PROBLEM/question blocks found"
-    if not _SOLUTION_MARK.search(text):
-        return False, "problems missing solution/answer keys"
-    # source 개념 근거를 하나라도 갖는지(leak 방지: 아예 동떨어지면 reject)
+    if _META.search(text):
+        return False, ("output writes 'Formulate/make/students must …' (meta) "
+                       "instead of concrete exercises")
+    blocks = _split_problem_blocks(text)
+    if not blocks:
+        return False, "no concrete problem blocks found"
+
+    req = _requested_count(question)          # 1+ ; 지정 없으면 1
+    if len(blocks) < req:
+        return False, (f"only {len(blocks)} problem block(s) but request asked "
+                       f"for at least {req}")
+
+    # 각 블록이 "실행/대상 질문 + 해답" 을 갖는지
+    for b in blocks:
+        bl = b.lower()
+        if _META.search(b):
+            return False, "a block is a meta prompt, not a concrete problem"
+        has_ask = ("question" in bl) or ("?" in b) or (":" in b)
+        has_answer = bool(_SOLUTION_OK.search(b))
+        concreteness = bool(_NUM.search(b) or _IMPERATIVE.search(b))
+        if not (has_ask and has_answer and concreteness):
+            return False, ("a problem block lacks required structure "
+                           "(imperative/numeric Question + Solution/Answer)")
+
     ok, reason = lexical_ok(question, chunks, text)
     if not ok:
         return False, reason
-    return True, f"problems ok (≥{n_prob})"
+    return True, f"problems ok (N={len(blocks)})"
+
+
+def _requested_count(question: str) -> int:
+    low = (question or "").lower()
+    m = re.search(r"(\d+)\s*(?:problems|exercises|questions|문제)", low)
+    if m:
+        return max(1, int(m.group(1)))
+    if re.search(r"\btwo\b|두\s*문제", low):
+        return 2
+    if re.search(r"\bthree\b|세\s*문제", low):
+        return 3
+    return 1
+
 
 # 출제 전용 교정 프롬프트 (인용-재현이 아니라 '출제 지침' 강조)
 def problems_correction_prompt(question, chunks, reason) -> str:
@@ -146,12 +206,16 @@ def problems_correction_prompt(question, chunks, reason) -> str:
     return (
         f"Your generated problem set was REJECTED.\nReason: {reason}\n\n"
         "PROBLEM-SETTER STRICT RULES:\n"
-        "- Produce 2-4 well-posed problems whose concepts and methods come ONLY "
-        "from the reference below; you may choose new numbers but each required "
-        "fact must appear in the reference.\n"
-        "- For EVERY problem give: PROBLEM N — [concept], Question, Solution key "
-        "(exact steps/answer using the source method), Difficulty.\n"
-        "- Never invent a theorem/rule/number the source cannot support.\n\n"
+        "- Produce the requested number of CONCRETE exercises, each with explicit "
+        "numbers/series (no 'Formulate a problem' meta). "
+        "- For EVERY problem write, in order:\n"
+        "    PROBLEM <n> — [concept]\n"
+        "    Question: <a specific ask, e.g. 'Find the smallest n so R_n < …'>\n"
+        "    Solution key: <exact steps & numeric answer using the source method>\n"
+        "    Difficulty: easy|medium|hard\n"
+        "- Concepts/methods only from the reference below; numbers may be new but "
+        "facts must be in the source. Never require a theorem/value that the source "
+        "cannot support (e.g. don't drag in 'absolute convergence' if absent).\n\n"
         "ORIGINAL REQUEST:\n" + question.strip() + "\n\n"
         "REFERENCE CONTEXT (concepts only):\n" + block
     )

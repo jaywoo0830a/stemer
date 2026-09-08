@@ -78,6 +78,7 @@ class Orchestrator:
         grounding_retries: int = 2,     # 검증 gate 재시도 (엄격 모드)
         verifier=None,                  # Tier-2 LLM 판사 인스턴스 (verify.Verifier). 정적 시.
         verifier_factory=None,          # (producer_role:str)->Verifier — 역할마다 다른 모델 판사
+        problems_verifier=None,         # 출제 전용 판사(ProblemsVerifier). None → 구조검증만
     ) -> None:
         self.registry = registry or Registry()
         self.pool = ServerPool(self.registry)
@@ -89,6 +90,7 @@ class Orchestrator:
         self.grounding_retries = max(0, int(grounding_retries))
         self.verifier = verifier
         self._verifier_factory = verifier_factory
+        self.problems_verifier = problems_verifier
         self._factory = gateway_factory or _default_factory
         if note_dir is not None:
             os.environ["AGENT_NOTES_DIR"] = str(note_dir)
@@ -187,10 +189,25 @@ class Orchestrator:
                     return mk(out, ok=False,
                               note=f"rejected x{self.grounding_retries + 1}: {last_reason}")
 
-                # 출제는 '단일 정답 인용'이 아니라 생성이므로 답-정답 판사는 거치지
-                # 않고, 구조+개념-근거(Tier1) 통과로 수용 (출제 전용 교정은 위).
+                # 출제(problems)
                 if is_problems:
-                    return mk(out, ok=True, note=f"problem set accepted ({tier_reason})")
+                    if self.problems_verifier is None:
+                        # 판사 미구성: 구조+개념-근거 통과로 수용 (답-인용 판사는 안 격)
+                        return mk(out, ok=True, note=f"problem set accepted"
+                                                     f" (structure ok)")
+                    v = self.problems_verifier.verify(qtext, chunks, out)
+                    if v.ok and v.grounded:
+                        return mk(out, ok=True,
+                                  note="problem set accepted (struct + problems-judge ok)",
+                                  judge_role=v.judge_role, codes=v.error_codes)
+                    last_reason = v.human
+                    last_codes = v.error_codes
+                    if attempt < self.grounding_retries:
+                        continue
+                    return mk(out, ok=False,
+                              note=(f"rejected x{self.grounding_retries + 1}: "
+                                    f"{last_reason}"),
+                              judge_role=v.judge_role, codes=last_codes)
 
                 # Tier-2 (판사): 근거·참·오류·예외 — source 강제
                 verdict = self._judge(qtext, chunks, out, role)

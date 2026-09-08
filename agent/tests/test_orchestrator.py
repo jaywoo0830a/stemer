@@ -235,4 +235,37 @@ def test_problems_action_accepted_via_structure_gate():
     assert "problem set accepted" in res[0].grounding_note
 
 
+def test_problems_action_failed_by_problems_judge():
+    """구조 통과해도 출제-판사(ProblemsVerifier)가 거부하면 재시도 후 UNGROUNDED."""
+    from agent.verify import Verdict
+    from agent.rag import Chunk as _C2
+
+    class ProbTransport(FakeTransport):
+        def post_text(self, url, body, timeout):
+            return {"choices": [{"message": {"role": "assistant", "content": PROBSET}}]}
+
+    class RejectingProblemsJudge:
+        def verify(self, question, chunks, answer) -> Verdict:
+            return Verdict(ok=False, grounded=False,
+                           errors=["contains absolute-convergence outside source"],
+                           error_codes=["extra_claim"], reason="extra_claim",
+                           judge_role="stub")
+
+    reg = Registry()
+    orch = Orchestrator(
+        registry=reg,
+        rag=_StubRag([_C2(source="calc", section="11.3",
+                          text="Integral Test Remainder Estimate has both n and n+1 bounds.")]),
+        grounding_retries=1,
+        problems_verifier=RejectingProblemsJudge(),
+        gateway_factory=lambda url, role: Gateway(base_url=url,
+                                                  transport=ProbTransport()))
+    res, _ = orch.run_tasks(
+        [Task(id=1, action="problems", input="make problems", role="worker")],
+        write=False)
+    assert res[0].ok and res[0].output   # 답은 있으나
+    assert res[0].grounded is False      # 출제-판사가 거부 → ungrounded
+    assert "extra_claim" in res[0].grounding_note
+
+
 

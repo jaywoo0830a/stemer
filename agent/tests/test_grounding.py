@@ -112,3 +112,24 @@ def test_problems_ok_rejects_short():
     assert ok is False
 
 
+def test_problems_ok_rejects_meta_prose():
+    # 재발했던 "Formulate ... students must" meta 서술 — 구체 문제 아님 → 거부
+    meta = ("1. Given a series, use the Integral Test to determine error... "
+            "Formulate a problem where students must apply this theorem.\n"
+            "2. Show absolute convergence implies convergence... The answers are "
+            "taken from the source.")
+    ok, reason = problems_ok("create 2 problems", [PASS, WORKED], meta)
+    assert ok is False
+    assert "meta" in reason.lower()
+
+
+def test_problems_ok_enforces_requested_count():
+    single = ("PROBLEM 1 — [Integral Test]\n"
+              "Question: Test whether Σ 1/sqrt(n) converges.\n"
+              "Solution key: via the Integral Test the integral diverges, so it diverges.\n"
+              "Difficulty: medium")
+    ok, reason = problems_ok("create 3 problems", [PASS], single)
+    assert ok is False
+    assert "at least 3" in reason.lower() or "block" in reason.lower()
+
+

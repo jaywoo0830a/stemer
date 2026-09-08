@@ -60,6 +60,29 @@ from . import prompts as _prompts  # noqa: E402
 
 JUDGE_SYSTEM = _prompts.JUDGE_SYSTEM
 
+# 출제(문제 만들기) 결과를 심판하는 전용 시스템 — 새 문제 숫자는 허용하되,
+# 각 문제가 concretely solvable & source-기반이며, 문맥 밖 일반정리를 안 쓰는지.
+JUDGE_PROBLEMS = _prompts.fetch_text("judge.problems", default=(
+    "You are a PROBLEM SET QUALITY judge. You are given the REQUEST, the "
+    "REFERENCE CONTEXT, and a CANDIDATE problem set authored by another model.\n"
+    "Judge ONLY the quality of the SET as self-contained exercises:\n"
+    "1) Concreteness: is each problem a concrete, well-posed question with a "
+    "numeric/symbolic target (not a meta 'Formulate a problem where …')?\n"
+    "2) Solvability-from-source: could a student solve each from the source "
+    "method alone? If a problem requires a concept/theorem/value absent from the "
+    "source -> extra_claim error (e.g. dragging in 'absolute convergence' when "
+    "the section lacks it).\n"
+    "3) Internal soundness: is each 'Solution key' consistent and not "
+    "nonsensical (no dropped bounds, no f_{n+1}<=f_n<=q garbage)?\n"
+    "4) Structure: PROBLEM n + Question + Solution key present.\n"
+    "New numbers chosen by the author are ALLOWED under the method; do NOT reject "
+    "for differing from a printed example number.\n"
+    "Return ONLY a strict JSON object: {\"ok\": bool, \"grounded\": bool, "
+    "\"errors\":[string], \"error_codes\":[string], \"exceptions\":[string], "
+    "\"reason\":string}. ok=false on any of: meta-only, unsolvable-from-source, "
+    "internally inconsistent solution."))
+
+
 
 def pick_judge_server(producer_role: str, registry) -> str:
     """생산자와 다른 역할의 판사 주소. env AGENT_JUDGE 가 있으면 그것 우선."""
@@ -87,16 +110,19 @@ def pick_judge_server(producer_role: str, registry) -> str:
 class LlmVerifier:
     """llama-server(Gateway) 에게 판사를 맡긴다. chat_json 사용(구조화)."""
 
-    def __init__(self, gateway: Gateway, *, judge_role: str = "reasoner") -> None:
+    def __init__(self, gateway: Gateway, *, judge_role: str = "reasoner",
+                 system: Optional[str] = None) -> None:
         self._gw = gateway
         self.judge_role = judge_role
+        self._system = system
 
     # Verifier 규약
     def verify(self, question: str, chunks: Sequence[Chunk],
                answer: str) -> Verdict:
         user = self._build_message(question, chunks, answer)
         try:
-            data = self._gw.chat_json(system=JUDGE_SYSTEM, user=user, max_tokens=1200)
+            data = self._gw.chat_json(system=self._system or JUDGE_SYSTEM,
+                                      user=user, max_tokens=1200)
         except GatewayError:
             # 판사 서버 장애/응답불가 → '미판정(deferred)' 으로 명시(하드 실패 대신).
             return Verdict(ok=True, grounded=True,
@@ -126,6 +152,13 @@ class LlmVerifier:
                            error_codes=_as_list(codes), judge_role=self.judge_role)
         return Verdict(ok=False, grounded=False, reason="judge reply not a dict",
                        judge_role=self.judge_role)
+
+
+class ProblemsVerifier(LlmVerifier):
+    """문제-셋 품질 판사: LlmVerifier + JUDGE_PROBLEMS 시스템."""
+
+    def __init__(self, gateway: Gateway, *, judge_role: str = "reasoner") -> None:
+        super().__init__(gateway, judge_role=judge_role, system=JUDGE_PROBLEMS)
 
 
 def _as_list(x) -> list:

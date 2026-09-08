@@ -116,8 +116,9 @@ def create_app(
             return MockGateway(url, role, echo=mock_echo)
 
     # 판사: 생산자와 다른 모델로 (self-confirmation 방지). 역할별로 동적 선택.
+    problems_verifier = None
     if live and use_judge:
-        from .verify import LlmVerifier, pick_judge_server
+        from .verify import LlmVerifier, ProblemsVerifier, JUDGE_PROBLEMS, pick_judge_server
 
         def verifier_factory(producer_role: str):
             try:
@@ -126,6 +127,16 @@ def create_app(
                 return None
             judge_role = judge_url.rpartition(":")[2]
             return LlmVerifier(Gateway(base_url=judge_url), judge_role=judge_role)
+
+        # 출제(problems) 전용 판사: 한 추론 모델을 판사로.
+        try:
+            p_url = pick_judge_server("problems", reg)
+            problems_verifier = ProblemsVerifier(
+                Gateway(base_url=p_url), judge_role=p_url.rpartition(":")[2])
+        except Exception:  # noqa: BLE001
+            problems_verifier = None
+        # JUDGE_PROBLEMS 를 참조해(코드/문서 연결) 미사용 경고 방지
+        _ = JUDGE_PROBLEMS
     else:
         verifier_factory = None
 
@@ -145,7 +156,8 @@ def create_app(
         return Orchestrator(
             registry=reg, rag=rag_eff, rag_k=rag_k,
             gateway_factory=factory, parser=parser, note_dir=note_dir,
-            verifier_factory=verifier_factory)
+            verifier_factory=verifier_factory,
+            problems_verifier=problems_verifier)
 
     @app.get("/health")
     def health() -> Dict[str, Any]:
