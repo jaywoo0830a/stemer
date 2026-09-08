@@ -75,8 +75,11 @@ def _full_user(topic, passages) -> str:
 
 def run_free_one(topic, llm, passages, notes_dir: str | Path) -> str:
     """topic 의 자유 md 학습자료를 notes_dir/<topic>.md 로 저장, 경로 반환(영어)."""
+    system = _FULL_SYSTEM
+    user = _full_user(topic, passages)
+    guard_ctx("concept(single)", llm, system, user, 16000)
     try:
-        res = llm.complete(system=_FULL_SYSTEM, user=_full_user(topic, passages),
+        res = llm.complete(system=system, user=user,
                            max_tokens=16000, json_object=False)
     except Exception as exc:  # noqa: BLE001
         raise exc
@@ -200,7 +203,9 @@ _EN_KICK = (
 # R1 이 reasoning 을 먼저 쓰므로 content 만 뽑으면 실제는 더 짧다. 그래서 요청 상한을
 # 가능한 '풍부'로 두되(concept/examples/practice 각각 독립 요청) ctx 를 넘기지는 않게:
 # 각 부분 최대를 생성 여유 끝(10k~12k)에 맞춘다.
-_PART_MAX = {"concept": 6000, "examples": 12000, "practice": 14000}
+# 문맥 4096: 한 요청의 생성분은 ≤~2500(권고안 P3). 목록(examples 5 · practice 20)
+# 은 '한 요청이 한 항목'으로 다회 누적(권고안 P2). 값은 per-request 상한이다.
+_PART_MAX = {"concept": 1600, "examples": 1800, "practice": 1800}
 
 # --- 개수·난이도 목록형 부분을 '여러 요청'으로 쪼개 누적 생성 ---
 # 단일 요청에서 R1 은 첫 마커 하나 만들고 완결한다(실측). ctx 가 작아 한 번에 N개
@@ -232,7 +237,7 @@ _SPEC = {
             "asks for; number them continuously (do not restart numbering).\n"),
     },
 }
-_LIST_PER_SHOT = 2     # tier 배치당 요청 개수 (ctx 여유 내 완결 위해)
+_LIST_PER_SHOT = 1     # 목록은 요청당 1개(문맥 4096 안에서 한 항목+풀이만 완성)
 
 
 def _count_markers(body: str, marker: str) -> int:
@@ -337,6 +342,8 @@ def _gen_part_body(topic, llm, part, sysp, passages) -> str:
     """
     spec = _SPEC.get(part)
     if spec is None:
+        guard_ctx(part, llm, sysp, _part_user(topic, passages, part),
+                  _PART_MAX.get(part, 8000))
         res = llm.complete(system=sysp, user=_part_user(topic, passages, part),
                            max_tokens=_PART_MAX.get(part, 8000),
                            json_object=False)
@@ -356,6 +363,7 @@ def _gen_part_body(topic, llm, part, sysp, passages) -> str:
             req = min(_LIST_PER_SHOT, need)
             start = idx + 1
             user = _tier_user(topic, passages, spec, tier, req, start)
+            guard_ctx(f"{part}:{tier}@{start}", llm, counted_sys, user, cap)
             try:
                 res = llm.complete(system=counted_sys, user=user,
                                    max_tokens=cap, json_object=False)
@@ -452,28 +460,48 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
     return str(combined)
 
 
-# ---- 입력 컨텍스트 균형(CPU 백엔드용) ------------------------------------
-# 총 ctx = 16384(804를 8081 llama-server). CPU(9700X) 는 프롬프트가 ~4k 를
-# 넘기며 O(n^2) 어텐션이 비선형 폭주하므로, passage 예산 기본을 ~4096 으로 잡는다.
-# env LOCAL_FREE_INPUT_TOKENS 로 상향 조정 가능(그러나 ctx 여유 초과 주의).
-MAX_INPUT = 16384      # 총 컨텍스트 (llama-server --ctx-size)
+# ---- 문맥 예산 (diffuse LLaDA: 한 요청의 시스템+passage+생성 본문 합 ≤4096) ----
+# 백엔드 문맥 창(총 처리 토큰). diffusion 은 넣은 생성문까지 한 창에 정제한다.
+CTX_LIMIT = 4096
+MAX_INPUT = CTX_LIMIT            # (레거시 호칭 유지 → 문맥 총량)
 HARD_CTX = MAX_INPUT
-_SCAFFOLD_EST = 640    # 시스템+토픽 헤더 등 passage 외 고정 오버헤드 근사
-DEFAULT_INPUT_TOKENS = 4096   # CPU 백엔드 실용 입력 한도
-
+_SCAFFOLD_EST = 640              # 시스템 헤더+토픽(권고안 P4 로 가능한 한 축약)
+_MIN_GEN_RESERVE = 2300          # 요청당 생성에 남겨야 할 최소(권고안 P3: gen ≤~2800)
+# passage 예산은 "문맥 - 시스템 - 생성 예비" 로 유도(권고안 P1). 운영은 더 보수적으로
+# LOCAL_FREE_INPUT_TOKENS 로, 기본은 약 1200 권장 수준이 context cap 을 넘지 않게.
+DEFAULT_INPUT_TOKENS = 1200
 
 
 def input_budget() -> int:
-    """입력 passage 에만 쓸 토큰 예산(권고안 A). env LOCAL_FREE_INPUT_TOKENS 로 조정.
-    상한 ≈ MAX_INPUT - _SCAFFOLD_EST(스캐폴드 포함해도 ctx 안쪽)이며 기본은 4096."""
+    """한 요청에 실을 passage 입력 예산(권고안 P1).
+
+    실제로는 시스템 + passage + 생성분 합이 CTX_LIMIT 이하여야 하므로,
+    passage 예산 = CTX_LIMIT - _SCAFFOLD_EST - _MIN_GEN_RESERVE 를 상한으로 두고
+    env LOCAL_FREE_INPUT_TOKENS(기본 1200) 로도 줄인다.
+    """
     import os
     try:
         want = int(os.environ.get("LOCAL_FREE_INPUT_TOKENS",
                                   DEFAULT_INPUT_TOKENS))
     except ValueError:
         want = DEFAULT_INPUT_TOKENS
-    cap = MAX_INPUT - _SCAFFOLD_EST
-    return max(1000, min(want, cap))
+    cap = MAX_INPUT - _SCAFFOLD_EST - _MIN_GEN_RESERVE
+    return max(200, min(want, cap))
+
+
+def guard_ctx(part: str, llm, system: str, user: str, outmax: int) -> None:
+    """권고안 P6: 시스템+user+생성분 합이 CTX_LIMIT 넘으면 요청 전에 거부.
+
+    llm 에 count_tokens 가 없으면(테스트 더미 등) 건너뛴다."""
+    counter = getattr(llm, "count_tokens", None)
+    if counter is None:
+        return
+    total = counter(system) + counter(user) + outmax
+    if total > CTX_LIMIT:
+        raise LLMError(
+            f"ctx overrun part={part}: sys+user+{outmax} ~= {total} > "
+            f"{CTX_LIMIT}; raise LOCAL_FREE_INPUT_TOKENS later won't help — "
+            "split further or shrink passage/output.")
 
 
 def estimate_tokens(text: str) -> int:
@@ -518,7 +546,7 @@ _PART_KEYWORDS = {
     "examples": ["example", "sample", "solution", "예제", "예 ", "worked"],
     "practice": ["exercise", "problem", "practice", "연습", "문제", "#7", "#24"],
 }
-_DEFAULT_PART_TOKENS = 2048    # 각 part 의 passage 예산 (권고안 B)
+_DEFAULT_PART_TOKENS = 700     # 각 part passage 예산 — 문맥 4096 대비 보수적(권고안 P1/B)
 
 
 def _part_score(part: str, text: str) -> int:

@@ -163,11 +163,11 @@ def test_pack_passages_respects_budget_keeps_prefix_order():
 
 
 def test_input_budget_default_is_cpu_safe_and_capped():
-    """권고안 A: CPU 백엔드는 프롬프트를 ~4096 으로 제한. env 로만 상향."""
+    """권고안 P1: diffuse 문맥 4096. passage 예산 = CTX - 시스템 - 생성 예비."""
     import os
     import study_lib.generate_free as g
-    assert g.DEFAULT_INPUT_TOKENS <= 4096
-    cap = g.MAX_INPUT - g._SCAFFOLD_EST
+    assert g.DEFAULT_INPUT_TOKENS <= g.CTX_LIMIT
+    cap = g.MAX_INPUT - g._SCAFFOLD_EST - g._MIN_GEN_RESERVE
     b = g.input_budget()
     assert 0 < b <= cap
     if "LOCAL_FREE_INPUT_TOKENS" not in os.environ:
