@@ -199,13 +199,11 @@ _EN_KICK = (
     "finish every example and every solution completely before stopping."
 )
 
-# 각 부분의 최대 생성 토큰. ctx 16384 · prompt ≤~4096 인 채 남는 생성 여유 ≈ ~12k.
-# R1 이 reasoning 을 먼저 쓰므로 content 만 뽑으면 실제는 더 짧다. 그래서 요청 상한을
-# 가능한 '풍부'로 두되(concept/examples/practice 각각 독립 요청) ctx 를 넘기지는 않게:
-# 각 부분 최대를 생성 여유 끝(10k~12k)에 맞춘다.
-# 문맥 4096: 한 요청의 생성분은 ≤~2500(권고안 P3). 목록(examples 5 · practice 20)
-# 은 '한 요청이 한 항목'으로 다회 누적(권고안 P2). 값은 per-request 상한이다.
-_PART_MAX = {"concept": 1600, "examples": 1800, "practice": 1800}
+# 각 부분의 per-request 생성 상한(Phi-4 ctx 16384 autoregressive).
+# 하나의 complete() = 한 요청은 ctx 를 못 넘지만, 목록형은 _COUNTED/_SPEC 배치로
+# 여러 항목을 여러 요청에 걸쳐 누적 생성한다(_LIST_PER_SHOT 참고). 예제 5 · 문제
+# (10b/5s/5c) 목표가 여러 배치로 채워진다. 자유 길이 산출을 위해 넉넉히 둔다.
+_PART_MAX = {"concept": 7000, "examples": 9000, "practice": 11000}
 
 # --- 개수·난이도 목록형 부분을 '여러 요청'으로 쪼개 누적 생성 ---
 # 단일 요청에서 R1 은 첫 마커 하나 만들고 완결한다(실측). ctx 가 작아 한 번에 N개
@@ -237,7 +235,7 @@ _SPEC = {
             "asks for; number them continuously (do not restart numbering).\n"),
     },
 }
-_LIST_PER_SHOT = 1     # 목록은 요청당 1개(문맥 4096 안에서 한 항목+풀이만 완성)
+_LIST_PER_SHOT = 4     # 요청당 목록 개수 — 16k 생성 여백 내 여러 개를 한 요청에
 
 
 def _count_markers(body: str, marker: str) -> int:
@@ -460,24 +458,23 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
     return str(combined)
 
 
-# ---- 문맥 예산 (diffuse LLaDA: 한 요청의 시스템+passage+생성 본문 합 ≤4096) ----
-# 백엔드 문맥 창(총 처리 토큰). diffusion 은 넣은 생성문까지 한 창에 정제한다.
-CTX_LIMIT = 4096
-MAX_INPUT = CTX_LIMIT            # (레거시 호칭 유지 → 문맥 총량)
+# ---- 문맥 예산 (Phi-4-mini-reasoning / llama-server, ctx 16384) ----
+# autoregressive. 한 요청은 prompt+생성 합이 CTX_LIMIT 안이어야 하므로, passage 예산
+# 은 'CTX - 시스템(스케폴드) - 생성 예비'로 유도하고 큰창에 맞춰 넉넉하게 둔다.
+CTX_LIMIT = 16384
+MAX_INPUT = CTX_LIMIT
 HARD_CTX = MAX_INPUT
-_SCAFFOLD_EST = 640              # 시스템 헤더+토픽(권고안 P4 로 가능한 한 축약)
-_MIN_GEN_RESERVE = 2300          # 요청당 생성에 남겨야 할 최소(권고안 P3: gen ≤~2800)
-# passage 예산은 "문맥 - 시스템 - 생성 예비" 로 유도(권고안 P1). 운영은 더 보수적으로
-# LOCAL_FREE_INPUT_TOKENS 로, 기본은 약 1200 권장 수준이 context cap 을 넘지 않게.
-DEFAULT_INPUT_TOKENS = 1200
+_SCAFFOLD_EST = 1200         # 시스템 헤더+토픽(Phi-4 정상 autoregressive)
+_MIN_GEN_RESERVE = 5000      # 남길 최소 생성 여백 (긴 해설용)
+DEFAULT_INPUT_TOKENS = 6000  # passage 기본(필요 시 env LOCAL_FREE_INPUT_TOKENS)
 
 
 def input_budget() -> int:
-    """한 요청에 실을 passage 입력 예산(권고안 P1).
+    """한 요청에 실을 passage 입력 예산.
 
-    실제로는 시스템 + passage + 생성분 합이 CTX_LIMIT 이하여야 하므로,
-    passage 예산 = CTX_LIMIT - _SCAFFOLD_EST - _MIN_GEN_RESERVE 를 상한으로 두고
-    env LOCAL_FREE_INPUT_TOKENS(기본 1200) 로도 줄인다.
+    autoregressive llama: prompt + 생성 합이 CTX_LIMIT(16384) 안이어야 하므로
+    passage 상한 = CTX_LIMIT - _SCAFFOLD_EST - _MIN_GEN_RESERVE. 기본/기본env 는
+    DEFAULT_INPUT_TOKENS 이며 넘지 않는 선에서 LOCAL_FREE_INPUT_TOKENS 로 조정.
     """
     import os
     try:
@@ -546,7 +543,7 @@ _PART_KEYWORDS = {
     "examples": ["example", "sample", "solution", "예제", "예 ", "worked"],
     "practice": ["exercise", "problem", "practice", "연습", "문제", "#7", "#24"],
 }
-_DEFAULT_PART_TOKENS = 700     # 각 part passage 예산 — 문맥 4096 대비 보수적(권고안 P1/B)
+_DEFAULT_PART_TOKENS = 4000     # 각 part passage 예산 (16k 대비 — 권고안 B/B)
 
 
 def _part_score(part: str, text: str) -> int:
