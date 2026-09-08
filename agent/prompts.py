@@ -112,6 +112,8 @@ def _load_cfg() -> dict:
             judge = raw.get("judge") or {}
             if judge.get("system"):
                 data["judge.system"] = str(judge["system"])
+            if judge.get("problems"):
+                data["judge.problems"] = str(judge["problems"])
             parser = raw.get("parser") or {}
             if parser.get("system"):
                 data["parser.system"] = str(parser["system"])
@@ -126,7 +128,12 @@ def _cfg(_k: str) -> str:
 
 # 판사/파서 시스템 (verify.py / planner.py 가 import)
 JUDGE_SYSTEM = _cfg("judge.system")
+JUDGE_PROBLEMS = _cfg("judge.problems")
 PARSER_SYSTEM = _cfg("parser.system")
+
+# fetch_text: config 키가 없으면 기본값 반환 (예: JUDGE_PROBLEMS fallback)
+def fetch_text(key: str, default: Optional[str] = None) -> str:
+    return _cfg(key) or (default or "")
 
 
 def system_prompt(role: str, task_id: int, n_context: int,

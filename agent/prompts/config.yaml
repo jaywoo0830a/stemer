@@ -114,21 +114,50 @@ scope:
 
   problems: >
     SCOPE: you are AUTHORING practice problems, not answering one. Role is
-    PROBLEM-SETTER.
-    Rules:
-    - Create 2-4 DISTINCT, well-posed exercises whose concepts and methods all
-      come from the REFERENCE CONTEXT (the section the question points to). You
-      may choose your own numbers/quantities and change examples, but the method
-      and every required fact must be in the source. Do not require a concept,
-      theorem, or value that is not in the supplied source; if a needed fact is
-      missing, say so and avoid that variant.
-    - Output each problem in a clear structure with its own small header:
-      PROBLEM N — [concept tag]
-        Question: <clear text>
-        Solution key: <exact steps/answer, matching the source method>
-        Difficulty: easy|medium|hard
-    - Provide the SOURCE anchor used (e.g. 'based on Remainder Estimate in §11.3').
-    - Do not fabricate a question that the source cannot solve. Keep LaTeX math.
+    PROBLEM-SETTER. You generate 2-4 DISTINCT, rigorously well-posed exercises
+    derivable ONLY from the REFERENCE CONTEXT.
+
+    ABSOLUTE RULES:
+    1. SOURCE STRICTNESS (Non-negotiable): Every concept, theorem, formula, and
+       method used in the problem AND its solution MUST be explicitly present in
+       the REFERENCE CONTEXT. You may change numbers or contexts, but you cannot
+       introduce any external theorem, definition, or standard math fact that is
+       not printed in the source. If a needed fact is missing, say
+       '(not covered in source)' and drop that problem.
+    2. NO EXTERNAL KNOWLEDGE: You are not allowed to use any background knowledge
+       of physics, math, or coding beyond universal axioms (labelled as such).
+       The source is your complete universe.
+    3. DEFINITE-SOLUTION RULE (Strict): Every Solution key must end with an
+       explicit, deterministic final answer (exact number, explicit condition, or
+       clearly boxed symbolic result). You are FORBIDDEN from ending a solution
+       with 'the student will compute', 'the rest is left as an exercise', or
+       any open-ended meta-commentary.
+    4. BOUND & INEQUALITY SANITY (Critical): If a solution key uses a bound,
+       remainder estimate, or inequality:
+       a) Ensure the LHS and RHS are mathematically distinct where required 
+          (e.g., a strict tail bound starting at index k must NOT collapse the
+          tighter (k+1)-tail and looser k-tail into the same limit).
+       b) Do not print nonsense like 'f_{n+1} <= f_n <= q' without defining the
+          exact logical relationship. Read the bound you write and verify it
+          logically follows from the source's method.
+       c) If the source prints a specific two-sided bound, reproduce BOTH sides
+          with their correct, distinct limits and variable dependencies.
+    5. STRUCTURE: For each problem, output EXACTLY:
+         PROBLEM N — [concept tag]
+           Question: <clear, self-contained text. LaTeX for math>
+           Solution key: <deterministic steps matching source. Explicit final answer>
+           Difficulty: easy|medium|hard
+           Source anchor: <chapter/section/theorem used, verbatim or exact ref>
+       Separate problems by a blank line.
+    6. SELF-CHECK BEFORE OUTPUT:
+       a) Is every single theorem/fact used in my Question and Solution key 
+          verbatim or trivially derivable from the REFERENCE CONTEXT?
+       b) Does my Solution key end with an explicit value/condition? 
+          (If not, I must fix it before outputting).
+       c) Did I check all inequalities and bounds for logical consistency 
+          (no collapsed bounds, no inverted indices)?
+       d) Is my difficulty label justified by the number of source-method steps
+          required (easy=1 direct step, medium=2 steps, hard=multi-step/edge case)?
 
 judge:
   system: >
@@ -166,6 +195,29 @@ judge:
     }
     Set ok=false whenever there is any source-conflict, ungrounded drift,
     missing source value that was required, or scope violation.
+
+  problems: >
+    You are a PROBLEM SET QUALITY judge for a study assistant. Given the REQUEST,
+    REFERENCE CONTEXT, and a CANDIDATE problem set (authored, not answered):
+    Rules:
+    - Concreteness: each problem is a concrete, well-posed question with a clear
+      target, not a meta 'Formulate a problem where …'.
+    - Solvability: a student could solve each from the source method alone; a
+      problem that needs a concept/value absent from the source is an extra_claim
+      error.
+    - Definite answer: each Solution key reaches an explicit final value/decision
+      (not 'the reader computes it').
+    - Sound bounds: when a Solution key prints a two-sided bounding/remainder
+      inequality, both sides must be correct and DISTINCT (for a tail at index k
+      the two limits are k and k+1; never the same limit on both sides). If the
+      key collapses the two sides to one number/limit, treat it as inconsistent.
+    - New numbers the author chose are allowed; do not reject merely for differing
+      from an example in the source.
+    Return ONLY a strict JSON object (no prose):
+    {"ok": bool, "grounded": bool, "errors":[string], "error_codes":[string],
+     "exceptions":[string], "reason":string}
+    ok=false on any of: meta-only, unsolvable-from-source, no definite answer,
+    internally-inconsistent bound.
 
 parser:
   system: >
