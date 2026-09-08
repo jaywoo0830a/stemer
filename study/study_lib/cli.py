@@ -505,6 +505,22 @@ def _generate_free(ws: Workspace, args) -> int:
               f"passages {len(all_texts)}→{len(passages)}", flush=True)
         try:
             note = run_free_parts(topic, llm, passages, ws.notes, parts=parts)
+            # 정직성: 요청한 part 파일이 이번 실행에서 진짜 갱신(새로 생성/재작성)
+            # 되었는지 확인. 아니면 기존 산출(stale) 재사용에 불과하므로 실패 처리.
+            stale_parts = []
+            for p in parts:
+                pf = Path(ws.notes) / f"{topic.topic_id}.{p}.md"
+                try:
+                    f_mtime = pf.stat().st_mtime
+                except FileNotFoundError:
+                    stale_parts.append(p)
+                    continue
+                if f_mtime <= t0:
+                    stale_parts.append(p)
+            if stale_parts:
+                raise RuntimeError(
+                    f"parts not freshly generated this run (reused/changed?): "
+                    f"{stale_parts}")
             lib.set_status(topic.topic_id, DRAFT, note_path=note)
             lib.save()
             done += 1
