@@ -150,37 +150,6 @@ scope:
            Difficulty: easy|medium|hard
            Source anchor: <chapter/section/theorem used, verbatim or exact ref>
        Separate problems by a blank line.
-    7. SYMPY-ONLY CALCULATION (Strict):
-       a) If a Solution key needs ANY numeric result (a value, a count n, a
-          definite integral, a root, a sum/partial sum, a comparison test
-          bound being < a epsilon), you MUST also give, immediately after that
-          Solution key, a complete, directly executable ```sympy``` code block
-          that computes that final number/answer.
-       b) You MUST NOT compute the number yourself in your head. Never write a
-          final number that does not match what your ```sympy``` block prints.
-          If the sympy block and your Solution key's printed final value ever
-          disagree, it is a critical 'hand-calculation error'.
-       c) The sympy block must end by printing (or assigning to `answer`/`result`
-          and printing) the final numeric answer, e.g.:
-          ```sympy
-          from sympy import *
-          n = ceiling(sqrt(1/(2*Rational(1,2000))))
-          answer = n
-          print(answer)
-          ```
-       d) Concept/theorem-only problems (no numbers to compute) need NO sympy
-          block — omit it there.
-       e) If sympy genuinely cannot compute the value, write
-          '(sympy cannot compute this)' instead of a hand-guessed number.
-       f) MANDATORY EXECUTABLE RESULT (Strict): A Solution key may state its
-          final numeric answer EITHER (i) write the placeholder <<RESULT>> at the
-          answer position (the system runs your code and replaces it with the
-          real value), OR (ii) write the literal number — but that literal MUST
-          be exactly what your code block's final printed value is. Never write
-          a literal that differs from your own executed code. Writing
-          <<RESULT>> without any executable code block is also rejected
-          (missing_code_block). Every numeric problem therefore needs a complete,
-          runnable block that prints one final number.
     6. SELF-CHECK BEFORE OUTPUT:
        a) Is every single theorem/fact used in my Question and Solution key 
           verbatim or trivially derivable from the REFERENCE CONTEXT?
@@ -201,10 +170,105 @@ scope:
           whose solve returns EmptySet/undefined/negative-for-an-index, my
           premise is wrong — fix it so the executed output is a real positive
           index / concrete value consistent with my stated assumptions.
-      Source-dependent quick test: if I claim "find smallest n", my code path
-      (remainder formula from source → inequality < ε → smallest integer) must
-      produce one positive integer; any non-positive or empty result means the
-      problem premise is internally inconsistent (reject before output).
+       h) Source-dependent quick test: if I claim "find smallest n", my code path
+          (remainder formula from source → inequality < ε → smallest integer) must
+          produce one positive integer; any non-positive or empty result means the
+          problem premise is internally inconsistent (reject before output).
+    7. SYMPY-ONLY CALCULATION (Strict — with mandatory examples and patterns):
+       a) For ANY numeric result, integral, derivative, root, sum, or inequality
+          threshold, you MUST provide an executable ```sympy``` block that
+          computes the final value.
+       b) The block must be self-contained: import sympy, declare ALL symbols
+          with necessary assumptions (positive=True, real=True, integer=True),
+          and define every variable used. Missing variable declarations cause
+          NameError and automatic rejection.
+       c) The block must end by assigning the final answer to a variable named
+          `answer` and printing it:
+          ```sympy
+          from sympy import *
+
+          # EXAMPLE: Find smallest n such that ∫_n^∞ 1/x^3 dx < 0.0005
+          x = symbols('x', positive=True)
+          n = symbols('n', positive=True, integer=True)
+
+          integral_value = integrate(1/x**3, (x, n, oo))   # 1/(2*n**2)
+
+          # Solve the inequality 1/(2*n**2) < 5/10000
+          # Use Rational to avoid floating-point issues
+          inequality = integral_value < Rational(5, 10000)
+          solutions = solve_univariate_inequality(inequality, n)
+
+          # Extract lower bound and apply ceiling
+          lower_bound = solutions.as_set().inf
+          answer = ceiling(lower_bound)
+
+          print(answer)   # 32
+          ```
+       d) Important SYMPY PATTERNS to follow:
+          - Always declare `x = symbols('x', positive=True)` (or real=True) when
+            x is an integration variable. If you write `integrate(1/x**3, (x, n, oo))`
+            without defining x, it will raise NameError and be REJECTED.
+          - Use `Rational(5, 10000)` instead of `0.0005` for exact symbolic math.
+          - For inequalities, use `solve_univariate_inequality` or
+            `reduce_inequalities`, NOT bare `solve` when the result is a set of
+            intervals.
+          - If the answer must be an integer, apply `ceiling()` or `floor()`
+            after extracting the lower/upper bound from the inequality solution.
+          - If you need to show the final LaTeX expression, use
+            `sympy.latex(expr)` — but do NOT hand-type LaTeX for computed values.
+       e) COMMON SYMPY MISTAKES TO AVOID (each causes automatic rejection):
+          1. MISSING SYMBOL DECLARATION:
+             BAD:  integrate(cos(x), (x, 0, pi))   # x, pi not defined
+             GOOD: from sympy import *; x = symbols('x'); integrate(cos(x), (x, 0, pi))
+          2. MISSING ASSUMPTIONS ON SYMBOLS:
+             BAD:  n = symbols('n'); integrate(1/x**3, (x, n, oo))
+                  # may produce Piecewise with annoying branches
+             GOOD: n = symbols('n', positive=True); x = symbols('x', positive=True)
+          3. USING FLOATS INSTEAD OF EXACT RATIONALS:
+             BAD:  0.0005  (float -> roundoff)
+             GOOD: Rational(5, 10000)
+          4. WRONG FUNCTION FOR INEQUALITY SOLVING:
+             BAD:  solve(1/(2*n**2) < Rational(5,10000), n)
+                  # solve often returns a simple condition, not an interval set
+             GOOD: solve_univariate_inequality(1/(2*n**2) < Rational(5,10000), n)
+                  # or reduce_inequalities(...)
+          5. NOT EXTRACTING A NUMBER FROM THE INEQUALITY SOLUTION:
+             BAD:  sol = solve_univariate_inequality(...); answer = sol
+                  # prints something like n > sqrt(1000) instead of 32
+             GOOD: lower = sol.as_set().inf; answer = ceiling(lower)
+          6. FORGETTING TO IMPORT CONSTANTS OR FUNCTIONS:
+             BAD:  E, pi, sqrt, exp, log, sin, cos, factorial used without import
+             GOOD: from sympy import *  (or explicitly import them)
+          7. CONFUSING = WITH == OR USING ^ FOR POWERS:
+             BAD:  y = x^2  (^ is XOR in Python, not power)
+             GOOD: y = x**2  (for expression); Eq(y, x**2) for equations
+          8. NOT ASSIGNING THE FINAL VALUE TO `answer`/`result`:
+             BAD:  compute something and just leave it in a temporary variable
+             GOOD: answer = <final expression>; print(answer)
+          9. MATRIX MULTIPLICATION:
+             BAD:  A * B  (element-wise, not matrix product)
+             GOOD: A @ B   (or A.multiply(B) in sympy)
+          10. DIFFERENTIATION/INTEGRATION VARIABLE MISMATCH:
+              BAD:  f = t**2; diff(f, x)   # no x in f
+              GOOD: f = x**2; diff(f, x)
+          11. USING solve ON A SET OF CONDITIONS THEN APPLYING ceiling DIRECTLY:
+              BAD:  sol = solve(...); n_val = ceiling(sol)  # sol is symbolic
+              GOOD: extract numeric bound from sol.as_set().inf or .sup first
+          12. NOT DECLARING ALL CONSTRAINTS IN THE PROBLEM STATEMENT:
+              BAD:  Problem says "n is integer" but code lacks `integer=True`
+              GOOD: `n = symbols('n', integer=True, positive=True)`
+       f) Concept-only problems (no numbers) need NO code block. If you include
+          one anyway, it must run without error and its output must match any
+          stated numeric value.
+       g) MANDATORY EXECUTABLE RESULT (Strict): A Solution key may state its
+          final numeric answer EITHER (i) write the placeholder <<RESULT>> at the
+          answer position (the system runs your code and replaces it with the
+          real value), OR (ii) write the literal number — but that literal MUST
+          be exactly what your code block's final printed value is. Never write
+          a literal that differs from your own executed code. Writing
+          <<RESULT>> without any executable code block is also rejected
+          (missing_code_block). Every numeric problem therefore needs a complete,
+          runnable block that prints one final number.
 
 judge:
   system: >
@@ -273,6 +337,19 @@ judge:
           hand_calculation_error / missing_sympy and reject.
       Concept/theorem-only problems legitimately have no block and no verification
       note entry; do not demand one there.
+    - Common authoring mistakes to REJECT (even if code is present):
+      * Integration variable `x` not defined with `symbols('x')`.
+      * Symbol `n` used for an index without `positive=True` or `integer=True`
+        when the problem requires a positive integer.
+      * `solve` used for an inequality instead of `solve_univariate_inequality`
+        or `reduce_inequalities`, then the result is left symbolic instead of
+        extracting a numeric bound and applying `ceiling`.
+      * Floats used where exact rationals are needed (e.g. `0.0005` instead
+        of `Rational(5, 10000)`).
+      * `answer` variable not assigned or not printed.
+      * `^` used for exponentiation instead of `**`.
+      * Final numeric answer in Solution key does not match the printed output
+        of the code block.
     - MATHEMATICAL CONSISTENCY (Critical, COUNTER-CONTRADICTION):
         * The problem must be internally consistent and well-posed. Its stated
           constraints/assumptions (e.g. x>0, n integer, f continuous, index
