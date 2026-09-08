@@ -206,7 +206,9 @@ _EN_KICK = (
 # 각 부분의 per-request 생성 상한(Phi-4 ctx 131072 autoregressive).
 # 하나의 complete() = 한 요청. 목록형은 _COUNTED/_SPEC 배치로 다회 누적해 항목을 채운다.
 # 128k 여유라 요청당 길게 뽑아도 되지만 목표(examples 5 · practice 20)는 명시 수 유지.
-_PART_MAX = {"concept": 30000, "examples": 32000, "practice": 36000}
+# part 별 per-request 생성 상한. concept 는 서술 narrative(긴 문장 안정)라 크게,
+# examples/practice 는 '한 항목'씩 짧게(1200~2500) 해 정확한 수식·proof 를 유지.
+_PART_MAX = {"concept": 30000, "examples": 4000, "practice": 4000}
 
 # --- 개수·난이도 목록형 부분을 '여러 요청'으로 쪼개 누적 생성 ---
 # 단일 요청에서 R1 은 첫 마커 하나 만들고 완결한다(실측). ctx 가 작아 한 번에 N개
@@ -238,7 +240,7 @@ _SPEC = {
             "asks for; number them continuously (do not restart numbering).\n"),
     },
 }
-_LIST_PER_SHOT = 8     # 요청당 목록 개수 — 128k 생성 여백 내 여러 개를 한 요청에
+_LIST_PER_SHOT = 1     # 요청당 항목 1 개 — 긴 단일스트림에서 수식 연산자 소실(decay) 방지
 
 
 def _count_markers(body: str, marker: str) -> int:
