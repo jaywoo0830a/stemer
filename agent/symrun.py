@@ -35,6 +35,10 @@ except Exception:  # noqa: BLE001
 _FENCE = re.compile(r"```sympy\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 _FENCE_BOTH = re.compile(
     r"```(?:sympy|python)\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+# 라벨 없는 ``` ``` fence 도 허용(모델이 ```sympy/```python 라벨을 빼먹는 일이
+# 잦아 형식 누락으로 실행 기회를 놓치지 않게). 라벨 없이는 실행 코드인지 헤아려만 합.
+_FENCE_ANY = re.compile(r"```\s*\n(.*?)```", re.DOTALL)
+_IMPORT_LINE = re.compile(r"^\s*(?:from\s+\w+|import\s+\w+)", re.MULTILINE)
 
 _ALLOWED_BUILTINS = {
     "abs", "round", "int", "float", "bool", "min", "max", "print", "range",
@@ -75,14 +79,34 @@ def extract_blocks(text: str, *, sympy_only: bool = True) -> List[str]:
 
 
 def extract_code_blocks(text: str) -> List[str]:
-    """검증 대상 코드 블록: ```sympy``` 와 ```python``` **둘 다** 뽑는다.
+    """검증 대상 코드 블록: ```sympy```, ```python```, 그리고 **라벨 없는** ``` ```
+    중 실행 코드로 보이는 블록 모두를 뽑는다.
 
-    출제 모델이 종종 ```sympy``` 대신 ```python``` 펜스로 계산 블록을 내므로,
-    검증 게이트(손계산 드리프트 탐지)는 python 펜스를 외면해 broken 코드/가짜
-    수치가 통과하는 우회를 막기 위해 두 펜스를 모두 실행 후보로 본다. (그렇지
-    않으면 'python 펜스로 써서 실행 안 됨' → no_sympy_block advisory → LLM 판사
-    가 코드를 실제 실행 없이 통과시켜버림.)"""
-    return [m.group(1).strip() for m in _FENCE_BOTH.finditer(text or "")]
+    - labeled ```sympy```/```python```: 그대로 전부 포함.
+    - 라벨 없는 ``` ```: 실행 코드처럼 보이는 것(import 문장 또는 print( 호출 포함)
+      만 포함 — 순수 결과 표기/답안만 담긴 fence, prose 는 제외).
+    출제 모델이 ```sympy``` 대신 ```python``` 혹은 라벨 없는 fence 로 계산 블록을
+    자주 내므로, 검증 게이트가 형식 누락으로 broken/가짜 수치가 통과하거나(advisory),
+    반대로 내용은 맞아도 라벨 누락으로 missing_code_block 이 되는 우회를 막는다.
+    """
+    blocks: List[str] = []
+    seen: set = set()
+    for m in _FENCE_BOTH.finditer(text or ""):
+        c = m.group(1).strip()
+        if c and c not in seen:
+            seen.add(c)
+            blocks.append(c)
+    for m in _FENCE_ANY.finditer(text or ""):
+        c = m.group(1).strip()
+        if c in seen or not c:
+            continue
+        # 라벨 없는 블록: 실제 '계산/해석 코드'처럼 보이는 것만 인정. 출제자가
+        # 산출값/마크다운 fence 로 보여주는 것(순수 수치, prose, 예시 print 하나)
+        # 은 제외한다 → 보수적으로 'import 문장 포함'인 코드 블록만 후보.
+        if _IMPORT_LINE.search(c):
+            seen.add(c)
+            blocks.append(c)
+    return blocks
 
 
 DEFAULT_TIMEOUT = 8.0  # 초

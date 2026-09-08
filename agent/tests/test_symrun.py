@@ -219,4 +219,45 @@ def test_run_gate_accepts_positive_value_non_index():
     assert g.hard is None
 
 
+# ---- 라벨 없는(``` ```) fence 도 실행 후보로 (missing_code_block 오판 방지) ----
+def test_extract_code_blocks_includes_unlabeled_executable_fence():
+    text = ("해설:\n```\nfrom sympy import *\nprint(ceiling(sqrt(1000)))\n```\n"
+            "답만 담긴 fence:\n```\n32\n```")
+    blocks = S.extract_code_blocks(text)
+    # 라벨 없지만 import/print 가 있는 것은 실행 코드로 캡처
+    assert any("from sympy" in b for b in blocks)
+    # 숫자 32 하나만 담긴 fence 는 실행 코드가 아니므로 제외
+    assert not any(b.strip() == "32" for b in blocks)
+
+
+def test_run_gate_unlabeled_code_block_executed_and_echoed():
+    # 모델이 라벨 없이 ``` ``` 로 올바른 코드를 내고 Solution key 에 n=32 를 적으면
+    # missing_code_block 오판이 아닌 정상 통과여야 한다.
+    p = ("PROBLEM 1 — [Summation]\n"
+         "Question: find smallest n so remainder R_n of sum 1/n^3 < 0.0005.\n"
+         "Solution key: 1/(2 n^2) < 0.0005 => n = 32.\n"
+         "```\nfrom sympy import *\n"
+         "n = symbols('n', real=True, positive=True)\n"
+         "r = 1/(2*n**2)\n"
+         "sol = solve_univariate_inequality(r < Rational(5,10000), n)\n"
+         "a = ceiling(sol.as_set().inf)\n"
+         "print(a)\n```\n"
+         "Difficulty: medium")
+    g = S.run_gate(p)[0]
+    assert g.has_code is True
+    assert g.hard is None  # missing_code_block 가 되어선 안 됨
+
+
+def test_run_gate_unlabeled_code_without_echo_still_value_mismatch():
+    # 라벨 없는 코드는 실행되지만 답(32)을 prose 에 안 적으면 여전히 value_mismatch
+    # (결정론: 코드는 검증, 해답 이력은 반드시 소유해야).
+    p = ("PROBLEM 1\nQuestion: find smallest n so R_n < 0.0005.\n"
+         "Solution key:\n```\nfrom sympy import *\n"
+         "n = symbols('n')\na = ceiling(sqrt(1/(2*Rational(1,2000))))\n"
+         "print(a)\n```\nDifficulty: medium")
+    g = S.run_gate(p)[0]
+    assert g.hard_code == "value_mismatch"
+
+
+
 
