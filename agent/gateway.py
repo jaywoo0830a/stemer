@@ -2,9 +2,10 @@
 
 설계 (study_lib.llm_local 관례):
 - 각 llama.cpp llama-server 는 OpenAI 호환 `/v1/chat/completions` 를 띄운다.
-- Ollama 는 OpenAI 호환 `/v1/chat/completions` 도 되지만 임베딩은 `/api/embed`
-  (/v1/embeddings 로도 가능)를 제공. 여기선 embed 역할만 Ollama `/api/embed` 사용.
-- 실제 네트워크는 httpx. 테스트는 _post/_get 를 monkeypatch 한 fake 로 계약 고정.
+- 임베딩: Ollama `/api/embed`(1차) → 지원 안 하면 OpenAI 호환 `/v1/embeddings`(2차,
+  llama.cpp `--embeddings`·Ollama 겸용). 띄운 서버에 --embeddings 가 없으면 최종
+  GatewayError 를 내고, 호출부(rag)는 어휘(BM25) 검색으로 자동 저하한다.
+- 실제 네트워크는 httpx. 테스트는 fake transport 로 계약 고정.
 - chat 응답에서 <think>…</think> 를 제거하고(R1/reasoning), 빈 내용/HTTP 오류는
   GatewayError 로.
 
@@ -132,17 +133,56 @@ class Gateway:
 
     # ---- embed ----
     def embed(self, texts: Sequence[str], *, model: str | None = None) -> list[list[float]]:
-        """Ollama `/api/embed` — bge/qwen 임베딩 (llama-server 는 --embeddings 미지원)."""
+        """텍스트 → 벡터. 두 백엔드를 두 경로로 시도한다.
+
+        - 1차: Ollama 스타일 `POST /api/embed`  (model + {"input": [...]}).
+        - 2차(저하): 응답이 "does not support embeddings"(llama --embeddings 없음)이면
+          OpenAI 호환 `POST /v1/embeddings` 로 재시도 — llama-server 를 `--embeddings`
+          로 띄운 뒤에도 이 메서드 하나로 동작하도록. 요청이 "임베딩 미지원"이 아니면
+          1차 실패를 그대로 되돌린다(단순 4xx 는 masking 하지 않음).
+        """
         if not texts:
             return []
-        body: dict[str, Any] = {"input": list(texts)}
-        if model:
-            body["model"] = model
-        data = self._transport.post_json(f"{self.base_url}/api/embed", body, self.timeout)
+        first = self._embed_via("/api/embed", texts, model)
+        if first is not None:
+            return first
+        # 1차가 '임베딩 미지원' 으로 실패 → llama --embeddings(OpenAI) 로 폴백
+        second = self._embed_via("/v1/embeddings", texts, model)
+        if second is not None:
+            return second
+        raise GatewayError(
+            "embedding disabled on this server (no /api/embed and no /v1/embeddings; "
+            "start llama-server with --embeddings or point to Ollama)")
+
+    def _embed_via(self, route: str, texts, model) -> Optional[list[list[float]]]:
+        body: dict[str, Any] = {}
+        if model and route == "/api/embed":
+            body["model"] = model          # Ollama: model 필수
+        if route == "/api/embed":
+            body["input"] = list(texts)    # Ollama payload
+        else:
+            body["model"] = model or "bge-m3"
+            body["input"] = list(texts)    # OpenAI 호환
+        try:
+            data = self._transport.post_json(
+                f"{self.base_url}{route}", body, self.timeout)
+        except GatewayError as exc:
+            if "does not support embeddings" in str(exc):
+                return None
+            raise
+        except Exception as exc:  # noqa: BLE001 - 잘못된 transport 는 폴백 지시로
+            if "does not support embeddings" in str(exc):
+                return None
+            raise
         embs = data.get("embeddings")
-        if not isinstance(embs, list):
-            raise GatewayError(f"embed response has no 'embeddings': {str(data)[:200]}")
-        return [list(map(float, e)) for e in embs]
+        if isinstance(embs, list):
+            return [list(map(float, e)) for e in embs]
+        # OpenAI 호환 응답은 data["data"][i]["embedding"]
+        if isinstance(data.get("data"), list):
+            vals = [d.get("embedding") for d in data["data"]]
+            if vals and all(isinstance(v, list) for v in vals):
+                return [list(map(float, v)) for v in vals]
+        raise GatewayError(f"embed response unrecognized on {route}: {str(data)[:200]}")
 
 
 class OllamaEmbed:

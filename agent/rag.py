@@ -97,7 +97,7 @@ class StudyStoreRetriever:
         self._store = store
         self._embedder = embedder
         self._dim = dim
-
+        self.last_mode = "dense"   # 마지막 retrieve 가 쓴 검색 모드 (진단용)
     @classmethod
     def load(cls, store_dir: Optional[str] = None,
              embedder: Optional[object] = None, *, dim: int = 3072,
@@ -128,10 +128,20 @@ class StudyStoreRetriever:
         return os.environ.get("STEMER_STORE") or str(repo / "study" / "data" / "store")
 
     def retrieve(self, query: str, k: int = 5) -> list[Chunk]:
-        from study_lib.store import SearchHit  # noqa
-        vec = self._embedder.embed_texts([query], batch_size=1)[0]
-        hits = self._store.search_dense(tuple(vec), k=k)
-        if len(hits) < k:  # 밀집이 부족하면 어휘(BM25) 보완
+        """근거 조회 — 밀집(코사인) 우선, 임베더 장애 시 어휘(BM25)로 자동 저하.
+
+        임베딩 서버가 --embeddings 없이 띄워져 501/실패를 내도 RAG 가 죽지 않도록
+        BM25(어휘)만으로도 결과를 주고, 모드(last_mode) 를 기록한다.
+        """
+        hits: list[SearchHit] = []
+        self.last_mode = "dense"
+        try:
+            vec = self._embedder.embed_texts([query], batch_size=1)[0]
+            hits = self._store.search_dense(tuple(vec), k=k)
+        except Exception as exc:  # noqa: BLE001 — 임베더 501/오프라인 → 어휘 검색 저하
+            self.last_mode = f"lexical(embed_off: {type(exc).__name__})"
+            hits = []
+        if len(hits) < k:  # 밀집 부족(또는 저하)시 어휘(BM25) 보완
             extra = {h.chunk_id for h in hits}
             for h in self._store.search_text(query, k=k):
                 if h.chunk_id not in extra:

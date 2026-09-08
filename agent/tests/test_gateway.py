@@ -60,6 +60,25 @@ def test_embed_uses_api_embed():
     assert t.calls[0]["body"]["model"] == "qwen2.5:3b"
 
 
+def test_embed_falls_back_to_openai_v1_when_llama_no_embeddings():
+    """11434 가 llama(--embeddings 없음) 면 /api/embed 로 501 → /v1/embeddings 재시도."""
+    class LlamaEmbed:
+        def __init__(self):
+            self.calls = []
+        def post_json(self, url, body, timeout):
+            self.calls.append(url)
+            if url.endswith("/api/embed"):
+                raise GatewayError("HTTP 501 … does not support embeddings. Start it with `--embeddings`")
+            # llama --embeddings(OpenAI 호환)
+            return {"data": [{"embedding": [0.5, 0.6]}]}
+
+    tr = LlamaEmbed()
+    gw = Gateway("http://x:11434", transport=tr)
+    vecs = gw.embed(["hello"], model="qwen2.5:3b")
+    assert vecs == [[0.5, 0.6]]
+    assert tr.calls == ["http://x:11434/api/embed", "http://x:11434/v1/embeddings"]
+
+
 def test_transport_http_error_wrapped(monkeypatch):
     class Boom:
         def post_json(self, url, body, timeout):
