@@ -157,21 +157,26 @@ class PlanParser:
         self.allow_fallback = allow_fallback
 
     def parse(self, plan: str) -> list[Task]:
-        system = (
-            "You split a study/coding plan into discrete worker tickets. "
-            + self.SCHEMA_HINT
-        )
-        # decision flow 의 안전대책: 모델이 본문 그대로 되돌려도 실패 안 하게
-        # 예측 불가 응답은 로컬 split_plan 으로 대체.
+        # (1) [Task]/## Task 라벨이 명시돼 있으면 → 결정적 split_plan 을 우선한다.
+        #     이유: 'explain → reasoner' 같은 parser 의 라벨 후크 업그레이드를 막고,
+        #     사용자가 명시한 [Task: action] 라벨 worker/coder/reasoner 를 확정 존중.
+        #     (무겁고 늦은 Qwen 티켓화를 생략 → 더 빠름)
+        local = split_plan(plan)
+        if local:
+            return local
+
+        # (2) 라벨이 없는 자유 텍스트일 때만 parser 서버에 정규화를 맡긴다.
+        from .prompts import PARSER_SYSTEM
         try:
-            obj = self.gateway.chat_json(system=system, user=plan, max_tokens=1200)
+            obj = self.gateway.chat_json(system=PARSER_SYSTEM,
+                                         user=plan, max_tokens=1200)
         except GatewayError:
             if self.allow_fallback:
-                return split_plan(plan)
+                return []
             raise
         raw = obj.get("tasks") if isinstance(obj, dict) else None
         if isinstance(raw, list) and raw:
             return [task_from_dict(t) for t in raw]
         if self.allow_fallback:
-            return split_plan(plan)
+            return []
         raise GatewayError("parser returned no tasks in response")

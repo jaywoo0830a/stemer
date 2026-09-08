@@ -68,28 +68,41 @@ def test_tasks_roundtrip_dicts():
     assert [t.id for t in back] == [t.id for t in ts]
 
 
-def test_plan_parser_uses_parser_gateway(monkeypatch):
+def test_labeled_plan_shortcircuits_parser_and_honors_label():
+    """[Task …: explain] 라벨이 있으면 결정적 split_plan 이 worker 로 고정.
+    (파서가 explain→reasoner 로 업그레이드하던 드리프트 재현 방지 — 회귀 가드)"""
+    fake = FakeTransport(chat_json_reply={
+        "tasks": [{"id": 1, "action": "explain", "role": "reasoner",
+                    "input": "why"}]})
+    gw = Gateway("http://x:8081", transport=fake)
+    pp = PlanParser(gw)
+    tasks = pp.parse("[Task 1: explain] why is integral zero symmetric")
+    assert len(tasks) == 1 and tasks[0].role == "worker"   # 라벨 존중 (파서 무시)
+    assert fake.calls == []                                   # 파서 안 불림
+
+
+def test_plan_parser_uses_parser_gateway_for_free_text(monkeypatch):
     fake = FakeTransport(chat_json_reply={
         "tasks": [{"id": 9, "action": "proof", "input": "orthogonality of sin",
                    "role": "reasoner"}]})
     gw = Gateway("http://x:8081", transport=fake)
     pp = PlanParser(gw)
-    tasks = pp.parse("any plan")
+    tasks = pp.parse("some free text without task markers")
     assert tasks[0].id == 9 and tasks[0].role == "reasoner"
     # parser 서버(/v1/chat/completions) 호출됐는지 확인
     assert fake.calls[0]["url"].endswith("/v1/chat/completions")
 
 
-def test_plan_parser_falls_back_on_gateway_error():
+def test_plan_parser_falls_back_on_gateway_error_free_text():
     class Boom(Gateway):
         def chat_json(self, **kw):  # noqa: ARG002
             from agent.gateway import GatewayError
             raise GatewayError("parser down")
 
     pp = PlanParser(Boom(base_url="http://x:8081"))  # type: ignore[abstract]
-    # allow_fallback=True 기본 → 로컬 split
-    out = pp.parse(PLAN)
-    assert len(out) == 4
+    # 라벨 없는 자유 텍스트 → parser 서버가 죽으면 빈 결과(fallback)
+    out = pp.parse("free text question no markers")
+    assert out == []
 
 
 def test_plan_parser_no_fallback_raises():
@@ -99,5 +112,6 @@ def test_plan_parser_no_fallback_raises():
             raise GatewayError("parser down")
 
     pp = PlanParser(Boom(base_url="http://x:8081"), allow_fallback=False)
+    # allow_fallback=False + 라벨 없는 자유 텍스트 → parser 호출 후 raise
     with pytest.raises(Exception):
-        pp.parse(PLAN)
+        pp.parse("free text question no markers")

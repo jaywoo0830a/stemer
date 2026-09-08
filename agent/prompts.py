@@ -1,58 +1,150 @@
-"""prompts — 역할별 시스템 프롬프트 + 근거 주입 규약 (NEW-METHOD §환각차단).
+"""prompts — 역할별 시스템/유저 프롬프트 (NEW-METHOD §환각차단, 엄격판).
 
-공통: 모델은 "입력 근거(reference context)"에만 의존해 답해야 하며, 없는 지식은
-창작하지 말아야 한다. 답변 형식은 마크다운 (코더는 ``` 코드 블록 필수).
+원칙(엄격):
+1. **정확한 질문 수행** — 사용자가 물은 것(그대로)에만 답한다. 연관된 "다른" 문제로
+   대체해 풀지 않는다. (예: “대칭 구간 적분 = 0 인 이유” ↔ “부정적분 공식” 구분.)
+2. **근거 우선(grounding)** — REFERENCE CONTEXT 가 있으면 그것에 근거한다.
+   - 컨텍스트가 비어 있거나 질문과 관련이 없으면, 일반 지식 유도임을 **명시**하고
+     교재(문헌) 근거처럼 가장하지 않는다.
+3. **추론은 보이게** — 답만 내놓지 말고 단계/조건을 밝힌다. 질문의 조건/클레임(예:
+   “symmetric interval”, “=0”)을 누락하지 않는다.
+4. **형식** — 마크다운 + LaTeX `$…$`. (코더는 ``` 코드 블록 필수)
+5. **모르면 솔직히** — 지어내지 않는다.
 """
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Optional, Sequence
 
 from .rag import Chunk
 
-
+# --------------------------------------------------------------------------- #
+# 역할 정의 — 각 역할 경계
+# --------------------------------------------------------------------------- #
 ROLE_STYLE: dict[str, str] = {
-    "worker": "You are a precise explanatory worker for STEM study. "
-              "Give short, source-grounded explanations in Korean-friendly markdown; "
-              "use LaTeX ($...$) for math. Never invent facts absent from context.",
-    "coder": "You are a code worker. Read the provided code context, then explain "
-             "root cause and/or return corrected minimal code in a ``` fenced block. "
-             "Anchor every claim in the shown symbols/files; never guess APIs absent "
-             "from context.",
-    "reasoner": "You are a rigorous reasoner. Produce step-by-step derivation or "
-                "proof from the provided context only. Mark any step you cannot "
-                "support from context as UNVERIFIED rather than fabricating.",
+    "worker": (
+        "You are a precise explanatory worker for STEM study.\n"
+        "Grounding: explain ONLY from REFERENCE CONTEXT when relevant; answer the "
+        "exact question asked.\n"
+        "Anti-drift: do NOT silently swap the question for a related formula or a "
+        "different exercise. A conceptual 'why is it zero / why / when' must be "
+        "answered as a concept — use formulas only to support it.\n"
+        "Math in LaTeX ($…$ / $$…$$)."
+    ),
+    "coder": (
+        "You are a code worker.\n"
+        "Grounding: base every claim and patch on the shown symbols/files in "
+        "REFERENCE CONTEXT. Never invent APIs, signatures, or paths absent from "
+        "context; name any guess as a guess.\n"
+        "Deliverable: (1) short root-cause, (2) minimal corrected code in ONE ``` "
+        "fenced block."
+    ),
+    "reasoner": (
+        "You are a rigorous reasoner.\n"
+        "Derive step by step. Every step must be justified from either REFERENCE "
+        "CONTEXT or universal axioms you label as such; mark unsupportable steps "
+        "UNVERIFIED.\n"
+        "Prove the exact claim in the question — if it asserts a specific fact "
+        "(e.g. an integral over a symmetric interval equals 0), prove THAT fact "
+        "under its conditions, not a generic nearby result."
+    ),
 }
 
+# 공통 제약(모든 역할) — 질문 치환 방지 + 근거 정직성
+_COMMON = (
+    "ABSOLUTE RULES (must obey):\n"
+    "1. Answer the EXACT question asked. Never replace it with a different but "
+    "similar problem. If asked to explain a property (e.g. why an integral over a "
+    "symmetric interval is 0), address exactly that property and its conditions, "
+    "not a bare antiderivative.\n"
+    "2. Treat REFERENCE CONTEXT as your primary source. When it is absent or "
+    "irrelevant, explicitly say '(general derivation — no study source)' and "
+    "never claim textbook provenance you do not have.\n"
+    "3. Do not invent citations, theorem/page numbers, or data.\n"
+    "4. Show reasoning step by step; state uncertainty.\n"
+    "5. Respond in markdown; math in LaTeX; concise but complete.\n"
+)
 
-def system_prompt(role: str, task_id: int, n_context: int) -> str:
-    base = ROLE_STYLE.get(role, ROLE_STYLE["worker"])
-    return (
-        f"{base}\n\nYou are handling ticket #{task_id}. Above all: answer ONLY from "
-        f"the {n_context} reference chunks supplied below. If the context is empty, "
-        "say so and ask for the source instead of making things up."
-    )
+
+# --------------------------------------------------------------------------- #
+def system_prompt(role: str, task_id: int, n_context: int,
+                  action: str = "", target: str = "") -> str:
+    meta: list[str] = [f"ticket #{task_id}", f"assigned role: {role}"]
+    if action:
+        meta.append(f"action: {action}")
+    if target:
+        meta.append(f"target: {target}")
+    head = "You are handling " + ", ".join(meta) + "."
+    return (head + "\n\n" + ROLE_STYLE.get(role, ROLE_STYLE["worker"])
+            + f"\n\nYou will see {n_context} reference chunk(s) below if any.\n\n"
+            + _COMMON)
+
+
+def _sym_condition_note(question: str) -> str:
+    """질문에서 지켜야 할 조건/클레임을 뽑아 재강조한다."""
+    notes: list[str] = []
+    low = question.lower()
+    if "symmetr" in low:
+        notes.append(
+            "interval is SYMMETRIC about the origin — respect even/odd structure")
+    if "zero" in low and ("integral" in low or "∫" in question
+                          or "integrate" in low):
+        notes.append(
+            "the claim says the integral equals ZERO — you must explain/prove WHY "
+            "it is zero (symmetry/orthogonality), not merely give an antiderivative")
+    if "orthogon" in low:
+        notes.append("intended concept is ORTHOGONALITY of basis functions")
+    if "fourier" in low:
+        notes.append("Fourier basis is the subject")
+    return ("\nConditions/claims in the question you MUST honor and address:\n"
+            + "\n".join(f"- {n}" for n in notes)) if notes else ""
 
 
 def context_block(chunks: Sequence[Chunk], max_chars: int = 6000) -> str:
-    """근거 청크를 모델 프롬프트 안쪽 인용 형식으로 직렬화 (↔ 컨텍스트 한도)."""
+    """근거 청크 → 인용 블록. 비어 있으면 NO-SOURCE 정책 문구."""
     if not chunks:
-        return "(no reference context found — do not fabricate; note this to the planner)"
+        return ("SOURCE: (NO-SOURCE — no reference chunks were supplied; "
+                "no study context has been loaded for this question)")
     parts: list[str] = []
     used = 0
     for c in chunks:
         snippet = c.text.strip()
         if used + len(snippet) > max_chars:
             break
-        parts.append(f"SOURCE {c.source}: {snippet}")
-        used += len(snippet) + len(c.source)
+        parts.append(f"SOURCE [{c.source}] ({c.section or 'sec?'}):\n{snippet}")
+        used += len(snippet) + len(c.source) + len(c.section)
     return "\n\n---\n\n".join(parts)
 
 
-def user_prompt(task_input: str, chunks: Sequence[Chunk]) -> str:
+def user_prompt(task_input: str, chunks: Sequence[Chunk],
+                *, task_action: str = "", task_target: str = "") -> str:
+    question = (task_input or "").strip()
+    cond = _sym_condition_note(question)
+    label = task_action or task_target or "question"
     return (
-        f"QUESTION / TICKET INPUT:\n{task_input.strip()}\n\n"
-        f"REFERENCE CONTEXT (grounding only):\n{context_block(chunks)}"
+        f"YOUR TASK (label={label}): answer the question below EXACTLY as given.\n\n"
+        f"QUESTION VERBATIM:\n{question}\n"
+        f"{cond}\n\nREFERENCE CONTEXT:\n{context_block(chunks)}\n\n"
+        "Begin by restating the exact question in one line, then answer it."
     )
+
+
+# --------------------------------------------------------------------------- #
+# parser(티켓화) — 엄격 스키마 강제. (planner.PlanParser.SCHEMA_HINT 를 대체)
+# --------------------------------------------------------------------------- #
+PARSER_SYSTEM = (
+    "You convert a study/coding plan into strict worker tickets.\n"
+    "Rules:\n"
+    "- A user label like '[Task 1: explain]' is AUTHORITATIVE for role mapping "
+    "(explain/summary/search→worker; code/fix/review→coder; proof/derive/deep→reasoner). "
+    "Never upgrade 'explain' to 'proof' unless the body itself demands a proof.\n"
+    "- Keep the FULL question text in 'input' verbatim — do not summarize it away.\n"
+    "- Preserve explicit file/target exactly.\n"
+    "- Split only on real task boundaries; do not invent tasks.\n"
+    "- Return ONLY a strict JSON object — no prose, no code fence.\n"
+    '  Schema: {"tasks":[{"id":int,"action":"explain|proof|code|fix|review|search|summary|deep",'
+    '"target":string,"input":string,"role":"worker|coder|reasoner"}]}\n'
+    '- If unsure, return {"tasks":[]}.'
+)
 
 
 def merge_results(results: Sequence[object]) -> str:
@@ -63,7 +155,7 @@ def merge_results(results: Sequence[object]) -> str:
         role = getattr(r, "role", "")
         out = getattr(r, "output", "")
         err = getattr(r, "error", None)
-        tag = f"Task {head} · {role}" if head else role
+        tag = f"Task {head} · {role}" if head is not None else (role or "agent")
         lines.append(f"## {tag}\n")
         if err:
             lines.append(f"> ⚠️ worker failed: {err}\n")

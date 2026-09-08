@@ -133,8 +133,11 @@ class Orchestrator:
         gw = self._factory(srv.url, role)
 
         from . import prompts
-        system = prompts.system_prompt(role, task.id, len(chunks))
-        user = prompts.user_prompt(task.input or task.desc, chunks)
+        system = prompts.system_prompt(role, task.id, len(chunks),
+                                       action=task.action, target=task.target)
+        user = prompts.user_prompt(task.input or task.desc, chunks,
+                                   task_action=task.action,
+                                   task_target=task.target)
         try:
             out = gw.chat(system=system, user=user, max_tokens=2000)
         except GatewayError as exc:

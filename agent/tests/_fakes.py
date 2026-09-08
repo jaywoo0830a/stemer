@@ -40,9 +40,12 @@ class FakeTransport:
     def _chat(self, body: dict) -> dict:
         messages = body.get("messages", [])
         blob = " ".join(str(m.get("content", "")) for m in messages)
+        is_json_req = ("Return ONLY a JSON object" in blob
+                       or "Return ONLY a strict JSON object" in blob
+                       or '"tasks":' in blob)
         # chat_json(parser)이면 스크립트된 JSON 을, 그냥 chat 이면 chat_reply 를.
         content = (self.chat_json_reply and json.dumps(self.chat_json_reply)) \
-            if "Return ONLY a JSON object" in blob else self.chat_reply
+            if is_json_req else self.chat_reply
         return {
             "id": "cmpl-fake",
             "choices": [{"message": {"role": "assistant", "content": content},
