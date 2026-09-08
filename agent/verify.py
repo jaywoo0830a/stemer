@@ -106,12 +106,22 @@ JUDGE_PROBLEMS = _prompts.fetch_text("judge.problems", default=(
 ))
 
 def pick_judge_server(producer_role: str, registry) -> str:
-    """생산자와 다른 역할의 판사 주소. env AGENT_JUDGE 가 있으면 그것 우선."""
+    """생산자와 다른 역할의 판사 주소. env AGENT_JUDGE 가 있으면 그것 우선.
+
+    전용 judge 역할이 설정돼 있으면(8092 등) 그 서버로; 없으면 생산자와 다른
+    기존 역할(reasoner/coder)로 폴백한다.
+    """
     import os
     ov = os.environ.get("AGENT_JUDGE")
     if ov:
         return ov.rstrip("/")
     r = registry
+    # 전용 판사 서버(judge) 가 있으면 우선 사용 (자기검증 방지·전용 14B 판정)
+    try:
+        if r.has("judge"):
+            return r.role("judge").urls[0]
+    except Exception:  # noqa: BLE001 — 역할 미정의시 폴백
+        pass
     if producer_role == "reasoner":
         try:
             return r.role("coder").urls[0]
@@ -161,18 +171,30 @@ class LlmVerifier:
         )
 
     def _parse(self, data) -> Verdict:
-        if isinstance(data, dict):
-            ok = bool(data.get("ok", False)) if "ok" in data else bool(data.get("grounded", False))
-            grounded = bool(data.get("grounded", ok))
-            errs = data.get("errors") or []
-            excs = data.get("exceptions") or []
-            codes = data.get("error_codes") or []
-            reason = str(data.get("reason", "") or "")
-            return Verdict(ok=ok, grounded=grounded, reason=reason,
-                           errors=_as_list(errs), exceptions=_as_list(excs),
-                           error_codes=_as_list(codes), judge_role=self.judge_role)
-        return Verdict(ok=False, grounded=False, reason="judge reply not a dict",
-                       judge_role=self.judge_role)
+        if not isinstance(data, dict):
+            return Verdict(ok=False, grounded=False, reason="judge reply not a dict",
+                           judge_role=self.judge_role)
+        # 초경량 스키마(v3): {"ok": bool, "code": "OK|ERR_*"} — 문제판사 전용.
+        #  (코드만 주고 prose 는 주지 않으므로, retry/진단용으로 내부 해석해 채운다.)
+        code = data.get("code")
+        if code is not None and ("ok" in data):
+            code_s = str(code).strip().upper()
+            err_codes, reason = _expand_verdict_code(code_s)
+            ok = bool(data.get("ok", True))
+            return Verdict(ok=ok, grounded=ok,
+                           reason=("judge: " + reason) if reason else "judge: OK",
+                           error_codes=[err_codes] if err_codes else [],
+                           judge_role=self.judge_role)
+        # 기존 풍부 스키마: {"ok","grounded","errors","error_codes","reason",...}
+        ok = bool(data.get("ok", False)) if "ok" in data else bool(data.get("grounded", False))
+        grounded = bool(data.get("grounded", ok))
+        errs = data.get("errors") or []
+        excs = data.get("exceptions") or []
+        codes = data.get("error_codes") or []
+        reason = str(data.get("reason", "") or "")
+        return Verdict(ok=ok, grounded=grounded, reason=reason,
+                       errors=_as_list(errs), exceptions=_as_list(excs),
+                       error_codes=_as_list(codes), judge_role=self.judge_role)
 
 
 class ProblemsVerifier(LlmVerifier):
@@ -188,6 +210,29 @@ def _as_list(x) -> list:
     if isinstance(x, (str, int, float)):
         return [str(x)]
     return []
+
+
+# 초경량 문제판사(v3)가 주는 식별 코드를 (error_code, 사람이 읽을 사유) 로 확장.
+_VERDICT_CODE = {
+    "OK": ("", ""),
+    "ERR_SOURCE": ("source_violation",
+                   "source_violation: problem/solution uses a fact absent from the source"),
+    "ERR_LOGIC": ("logic_error",
+                  "logic_error: bound collapse / impossible condition / internal contradiction"),
+    "ERR_SYMPY": ("hand_calculation_error",
+                  "hand_calculation_error: numeric problem lacks a runnable block or its output is unmatched"),
+    "ERR_STRUCT": ("structural_missing",
+                   "structural_missing: required fields (Question/Solution key) missing"),
+    "ERR_META": ("meta_question",
+                 "meta_question: not a concrete problem (e.g. 'Formulate a problem...')"),
+}
+_DEFAULT_CODE = ("other", "other: judge returned an unknown code")
+
+
+def _expand_verdict_code(code: str) -> tuple:
+    ec, reason = _VERDICT_CODE.get(code, _DEFAULT_CODE)
+    return ec, reason
+
 
 
 class StubVerifier:

@@ -166,6 +166,12 @@ class Orchestrator:
         role = task.role or "worker"
         query = task.input.strip() or f"{task.action} {task.target}"
 
+        # 문제 생성은 전용 setter 서버(8091·NEW-METHOD)가 있으면 그쪽으로.
+        # 없으면 기존 worker/coder 역할 주소로 폴백(단위 테스트·구버전 호환).
+        act = (task.action or "").strip().lower()
+        is_problems = act == "problems"
+        produce_role = "setter" if (is_problems and self.registry.has("setter")) else role
+
         chunks: list[Chunk] = []
         if self.rag is not None:
             try:
@@ -173,8 +179,8 @@ class Orchestrator:
             except Exception as exc:  # noqa: BLE001 — RAG 장애는 worker 실패로 처리
                 return WorkerResult(task=task.id, role=role, error=f"RAG failed: {exc}")
 
-        srv = self.pool.next(role)
-        gw = self._factory(srv.url, role)
+        srv = self.pool.next(produce_role)
+        gw = self._factory(srv.url, produce_role)
         from . import grounding, prompts
 
         qtext = task.input or task.desc
@@ -184,7 +190,6 @@ class Orchestrator:
                                             task_action=task.action,
                                             task_target=task.target)
 
-        is_problems = (task.action or "").strip().lower() == "problems"
         correct = (grounding.problems_correction_prompt if is_problems
                    else grounding.correction_prompt)
 

@@ -7,13 +7,25 @@ from agent.registry import (Registry, RegistryError, ServerPool, build_role,
 
 def test_default_roles_exist():
     reg = Registry()
+    # setter/judge 는 env/설정으로 붙이는 '선택' 역할이라 기본엔 없다
     assert set(reg.roles()) == {"parser", "worker", "coder", "reasoner", "embed"}
     assert reg.role("parser").base_url == "http://127.0.0.1:8081"
     # worker/coder 는 다중 pool
     assert len(reg.role("worker").urls) == 4
     assert reg.role("worker").urls[0] == "http://127.0.0.1:8082"
-    assert len(reg.role("coder").urls) == 2
+    assert len(reg.role("coder").urls) == 4
+    assert reg.role("coder").urls[0] == "http://127.0.0.1:8086"
+    assert "http://127.0.0.1:8089" in reg.role("coder").urls
+    assert "http://127.0.0.1:8090" in reg.role("coder").urls
     assert reg.role("embed").kind == "embed"
+
+
+def test_setter_judge_added_via_env(monkeypatch):
+    monkeypatch.setenv("AGENT_SETTER", "http://127.0.0.1:8091")
+    monkeypatch.setenv("AGENT_JUDGE", "http://127.0.0.1:8092")
+    reg = Registry()
+    assert reg.has("setter") and reg.role("setter").base_url == "http://127.0.0.1:8091"
+    assert reg.has("judge") and reg.role("judge").base_url == "http://127.0.0.1:8092"
 
 
 def test_unknown_role_raises():
@@ -53,9 +65,10 @@ def test_pool_single_urls_not_rotated():
 
 
 def test_default_ports_match_myllm():
-    """실서버 myllm config 와 일치해야 한다 — 회귀 가드."""
+    """실서버 myllm config 와 일치해야 한다 — 회귀 가드.
+    (코더 4 = 8086,8087,8089,8090; 8088 은 reasoner; setter/judge 는 옵션)"""
     reg = Registry()
     assert reg.role("parser").urls[0].endswith("8081")
     assert [u.rpartition(":")[2] for u in reg.role("worker").urls] == ["8082","8083","8084","8085"]
-    assert [u.rpartition(":")[2] for u in reg.role("coder").urls] == ["8086","8087"]
+    assert [u.rpartition(":")[2] for u in reg.role("coder").urls] == ["8086","8087","8089","8090"]
     assert reg.role("reasoner").urls[0].endswith("8088")

@@ -47,8 +47,13 @@ class RegistryError(Exception):
 DEFAULT_ROLES: Dict[str, list[str]] = {
     "parser": ["http://127.0.0.1:8081"],
     "worker": [f"http://127.0.0.1:{p}" for p in range(8082, 8086)],  # 8082-8085
-    "coder": ["http://127.0.0.1:8086", "http://127.0.0.1:8087"],
+    # 코더 4: 8086-8087 + 8089-8090 (8088 은 reasoner) — 서버 표준 배치
+    "coder": ["http://127.0.0.1:8086", "http://127.0.0.1:8087",
+              "http://127.0.0.1:8089", "http://127.0.0.1:8090"],
     "reasoner": ["http://127.0.0.1:8088"],
+    # (선택) 전용 문제생성기(SETTER) 와 판사(JUDGE) — env/agent.yaml 가 있으면 활성
+    "setter": ["http://127.0.0.1:8091"],
+    "judge": ["http://127.0.0.1:8092"],
     # 임베딩은 llama-server(--embeddings 없음)가 아니라 Ollama 를 쓴다.
     "embed": ["http://127.0.0.1:11434"],
 }
@@ -56,7 +61,7 @@ DEFAULT_ROLES: Dict[str, list[str]] = {
 # agent.yaml(설정)이 없으면 이 기본값 + env 오버라이드 사용
 _ENV_OVERRIDE = {
     "AGENT_PARSER", "AGENT_WORKERS", "AGENT_CODERS",
-    "AGENT_REASONER", "AGENT_EMBED",
+    "AGENT_REASONER", "AGENT_EMBED", "AGENT_SETTER", "AGENT_JUDGE",
 }
 
 
@@ -77,6 +82,8 @@ def build_role(name: str, urls: Optional[list[str]] = None, *, kind: str = "chat
             "worker": "AGENT_WORKERS",
             "coder": "AGENT_CODERS",
             "reasoner": "AGENT_REASONER",
+            "setter": "AGENT_SETTER",
+            "judge": "AGENT_JUDGE",
             "embed": "AGENT_EMBED",
         }[name]
         raw = os.environ.get(env_key)
@@ -99,6 +106,11 @@ class Registry:
                 "reasoner": build_role("reasoner"),
                 "embed": build_role("embed", kind="embed"),
             }
+            # 전용 서버가 env 로 선언되면 setter(문제생성)/judge(판사) 를 붙인다.
+            if _env_base("AGENT_SETTER"):
+                roles["setter"] = build_role("setter")
+            if _env_base("AGENT_JUDGE"):
+                roles["judge"] = build_role("judge")
         self._roles: Dict[str, Role] = roles
 
     def role(self, name: str) -> Role:
@@ -151,7 +163,8 @@ def load_registry(config_path: Optional[str | Path] = None) -> Registry:
     cfg = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     servers = cfg.get("servers", {}) or {}
     roles: Dict[str, Role] = {}
-    for name in ("parser", "worker", "coder", "reasoner", "embed"):
+    for name in ("parser", "worker", "coder", "reasoner", "setter", "judge",
+                 "embed"):
         entry = servers.get(name) or {}
         urls = entry.get("urls")
         kind = entry.get("kind", "embed" if name == "embed" else "chat")

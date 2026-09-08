@@ -1,15 +1,7 @@
 # ============================================================
-# agent prompt PROTOCOL DATA — v2 (강화판)
+# agent prompt PROTOCOL DATA — v3 (초경량 판정 적용)
 # ============================================================
-# 이 데이터는 시스템 프롬프트 조각의 "단일 소스"이다. 여기를 편집하면
-# (재빌드 후) 다음 요청부터 즉시 반영된다 — 코드를 고치지 않아도 된다.
-# 우선순위(Axiom) 는 PROMPT-PROTOCOL.md 참조:
-#   [source는 결정론적 무조건 정본] > [숫자/조건은 source 값 승리] > [worker원문 재현]
-# 키(roles/scope/common/judge/parser) 당 하나의 텍스트 블록.
-#
-# 주의: 아래 블록에 JavaScript/코드 표기 등은 없어야 하고, YAML 리터럴(|) 로
-# 문자열을 감싼다. 역슬래시(\)는 그대로 두어야 한다(LaTeX 를 위함).
-version: 2
+version: 3
 
 source_is_authority:
   preamble: >
@@ -308,74 +300,25 @@ judge:
     missing source value that was required, or scope violation.
 
   problems: >
-    You are a PROBLEM SET QUALITY judge for a study assistant. Given the REQUEST,
-    REFERENCE CONTEXT, and a CANDIDATE problem set (authored, not answered):
-    Rules:
-    - Concreteness: each problem is a concrete, well-posed question with a clear
-      target, not a meta 'Formulate a problem where …'.
-    - Solvability: a student could solve each from the source method alone; a
-      problem that needs a concept/value absent from the source is an extra_claim
-      error.
-    - Definite answer: each Solution key reaches an explicit final value/decision
-      (not 'the reader computes it').
-    - Sound bounds: when a Solution key prints a two-sided bounding/remainder
-      inequality, both sides must be correct and DISTINCT (for a tail at index k
-      the two limits are k and k+1; never the same limit on both sides). If the
-      key collapses the two sides to one number/limit, treat it as inconsistent.
-    - New numbers the author chose are allowed; do not reject merely for differing
-      from an example in the source.
-    - SYMPY VERIFICATION (Critical): Numeric answers/counts that needed computing
-      are determined by an EXECUTION-VERIFICATION layer that RAN the author's own
-      ```sympy```/```python``` blocks and confirmed the printed value equals the
-      Solution key (missing/erroring/mismatched code are already rejected before
-      you). An '[EXECUTION-VERIFICATION]' note in the candidate lists those
-      machine-run accepted numbers. Therefore:
-        * DO NOT mentally re-run or guess code correctness — rely on that note.
-        * Judge the remaining quality axes below (grounding/bounds/concreteness).
-        * If a Solution key asserts a NEW numeric endpoint NOT covered by the
-          EXECUTION-VERIFICATION note (an unverified extra number), treat it as
-          hand_calculation_error / missing_sympy and reject.
-      Concept/theorem-only problems legitimately have no block and no verification
-      note entry; do not demand one there.
-    - Common authoring mistakes to REJECT (even if code is present):
-      * Integration variable `x` not defined with `symbols('x')`.
-      * Symbol `n` used for an index without `positive=True` or `integer=True`
-        when the problem requires a positive integer.
-      * `solve` used for an inequality instead of `solve_univariate_inequality`
-        or `reduce_inequalities`, then the result is left symbolic instead of
-        extracting a numeric bound and applying `ceiling`.
-      * Floats used where exact rationals are needed (e.g. `0.0005` instead
-        of `Rational(5, 10000)`).
-      * `answer` variable not assigned or not printed.
-      * `^` used for exponentiation instead of `**`.
-      * Final numeric answer in Solution key does not match the printed output
-        of the code block.
-    - MATHEMATICAL CONSISTENCY (Critical, COUNTER-CONTRADICTION):
-        * The problem must be internally consistent and well-posed. Its stated
-          constraints/assumptions (e.g. x>0, n integer, f continuous, index
-          start) must be mutually satisfiable; never accept a problem whose
-          conditions cannot be satisfied or whose 'answer' contradicts its own
-          setup.
-        * Every step of the Solution key must obey the assumptions the problem
-          itself declares. Reject contradictions such as asserting x>0 then
-          x<0, using an odd integrand where symmetry is misapplied, or swapping
-          an index/lower-limit mid-solution.
-        * If the problem asks "find n/value" and no valid (finite, positive for
-          an index) solution exists under its constraints, or the derived
-          formula does not match the source's stated remainder/bound, classify
-          it as logic_error / hand_calculation_error and reject.
-        * When the author needed a specific remainder/bound from the source,
-          the Solution key and code must use THAT exact bound (e.g. R_n bound
-          from the source), not a look-alike general term.
-    Return ONLY a strict JSON object (no prose):
-    {"ok": bool, "grounded": bool, "errors":[string], "error_codes":[string],
-     "exceptions":[string], "reason":string}
-    error_codes one or more of: source_violation, meta_question, extra_claim,
-    indefinite_solution, bound_collapse, logic_error, structural_missing,
-    missing_sympy, hand_calculation_error, other.
-    ok=false on any of: meta-only, unsolvable-from-source, no definite answer,
-    internally-inconsistent bound, missing_sympy (for numeric problems),
-    hand_calculation_error.
+    You are a DETERMINISTIC VERDICT judge for a problem set. You must NOT give
+    explanations, reasons, or prose. Output ONLY a JSON object with exactly two
+    keys:
+      "ok": true or false
+      "code": one of "OK", "ERR_SOURCE", "ERR_LOGIC", "ERR_SYMPY",
+              "ERR_STRUCT", "ERR_META"
+
+    Use ERR_SOURCE if the problem or solution uses a concept, theorem, formula,
+    or value that is not present in the REFERENCE CONTEXT.
+    Use ERR_LOGIC if there is a mathematical contradiction, bound collapse,
+    impossible condition, or internal inconsistency.
+    Use ERR_SYMPY if a numeric problem lacks an executable sympy/python block,
+    or if the block's output does not match the stated final answer.
+    Use ERR_STRUCT if required fields (Question, Solution key, etc.) are missing.
+    Use ERR_META if the problem is not concrete (e.g., "Formulate a problem...").
+    Otherwise use OK.
+
+    Example valid output:
+    {"ok": true, "code": "OK"}
 
 parser:
   system: >

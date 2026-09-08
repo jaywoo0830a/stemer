@@ -66,6 +66,24 @@ def test_llm_verifier_parses_accept():
     assert verdict.ok is True and verdict.grounded is True
 
 
+def test_ultralight_problem_judge_code_expansion():
+    """v3 초경량 문제판사 {ok, code}: ERR_* 를 판사 없이 stable error_code + short
+    reason 으로 확장(교정 재시도가 사유를 잃지 않도록)."""
+    v = LlmVerifier(_fake({"ok": False, "code": "ERR_SYMPY"}),
+                    judge_role="reasoner")  # 기본(JSON 유도) system 사용
+    verdict = v.verify("find n", [Chunk(source="a", section="", text="t")], "ans")
+    assert verdict.ok is False and verdict.grounded is False
+    assert verdict.error_codes == ["hand_calculation_error"]
+    assert "hand_calculation_error" in verdict.human
+
+
+def test_ultralight_problem_judge_ok():
+    v = LlmVerifier(_fake({"ok": True, "code": "OK"}), judge_role="reasoner")
+    verdict = v.verify("?", [Chunk(source="a", section="", text="t")], "ok set")
+    assert verdict.ok is True and verdict.grounded is True
+    assert verdict.error_codes == [] and "OK" in verdict.human
+
+
 def test_llm_verifier_unreachable_defers_accept():
     class Boom(Gateway):
         def chat_json(self, **kw):

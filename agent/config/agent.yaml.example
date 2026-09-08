@@ -13,9 +13,18 @@ servers:
     urls: ["http://127.0.0.1:8082", "http://127.0.0.1:8083",
            "http://127.0.0.1:8084", "http://127.0.0.1:8085"]
   coder:
-    urls: ["http://127.0.0.1:8086", "http://127.0.0.1:8087"]
+    # 코더 4대 배치: 8086,8087 + 8089,8090 (8088 은 reasoner)
+    urls: ["http://127.0.0.1:8086", "http://127.0.0.1:8087",
+           "http://127.0.0.1:8089", "http://127.0.0.1:8090"]
   reasoner:
     urls: ["http://127.0.0.1:8088"]
+  # ★ 문제 생성(seter: 14B)과 판사(judge)를 전용 서버로 둘 때 활성화:
+  #   Oracle/판정 분업 — problems 경로는 setter 로 생성, 판단은 judge 로 흐른다.
+  #   (없으면 problems 는 worker 가 만들고 판사는 reasoner 가 맡는다.)
+  setter:
+    urls: ["http://127.0.0.1:8091"]
+  judge:
+    urls: ["http://127.0.0.1:8092"]
   embed:
     kind: embed
     urls: ["http://127.0.0.1:11434"]     # Ollama — llama-server 들은 --embeddings 없음
