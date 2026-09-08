@@ -30,7 +30,8 @@ RUN pip install --no-cache-dir -r requirements.txt pytest \
     && if [ "$DOCLING" = "1" ]; then \
          pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
          && pip install --no-cache-dir -r requirements-docling.txt \
-         && pip install --no-cache-dir --force-reinstall opencv-python-headless; fi
+          && pip install --no-cache-dir --force-reinstall opencv-python-headless; fi \
+          && pip install --no-cache-dir bitsandbytes
 
 # 코드/구성/테스트
 COPY study_lib ./study_lib

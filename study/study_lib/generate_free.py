@@ -77,10 +77,10 @@ def run_free_one(topic, llm, passages, notes_dir: str | Path) -> str:
     """topic 의 자유 md 학습자료를 notes_dir/<topic>.md 로 저장, 경로 반환(영어)."""
     system = _FULL_SYSTEM
     user = _full_user(topic, passages)
-    guard_ctx("concept(single)", llm, system, user, 16000)
+    guard_ctx("concept(single)", llm, system, user, 12000)
     try:
         res = llm.complete(system=system, user=user,
-                           max_tokens=16000, json_object=False)
+                           max_tokens=12000, json_object=False)
     except Exception as exc:  # noqa: BLE001
         raise exc
     body = res.content if isinstance(res.content, str) else str(res.content)

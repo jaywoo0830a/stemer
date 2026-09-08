@@ -137,7 +137,7 @@ class FlashClient:
             "model": self._model,
             "messages": build_messages(system, user),
             "max_tokens": max_tokens,
-            "temperature": 0.2,
+            "temperature": 0.0,
             "stream": False,
         }
         # 구조화 JSON: 기본 thinking off (비용/빈 content 방지).
