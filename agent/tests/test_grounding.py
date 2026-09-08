@@ -2,7 +2,7 @@
 import pytest
 
 from agent.grounding import (empty_or_too_short, lexical_ok, correction_prompt,
-                             numeric_anchor_check)
+                             numeric_anchor_check, problems_ok)
 from agent.rag import Chunk
 
 PASS = Chunk(source="calc", section="11.3", text=(
@@ -80,5 +80,35 @@ def test_numeric_anchor_deferral_passes_without_number():
     ok, _ = numeric_anchor_check(q, [WORKED],
                                  "not covered in the supplied source")
     assert ok is True            # 회피 → 강제 숫자 요구는 안 함(단 no assertion)
+
+
+# --- problems_ok (출제 구조 검증) ----------------------------------------------
+OK_SET = """PROBLEM 1 — [Remainder Estimate]
+Question: Use the remainder estimate R_n ≤ 1/(2n^2) for Σ 1/n^3 to bound the tail.
+Solution key: solve 1/(2 n^2) < eps (Integral Test Remainder Estimate).
+Difficulty: easy
+
+PROBLEM 2 — [Accuracy]
+Question: How many terms of Σ 1/n^3 are needed to be accurate to within 0.0005?
+Solution key: 1/(2 n^2) < 0.0005 -> n >= 32 per the source method.
+Difficulty: medium
+"""
+
+
+def test_problems_ok_accepts_structured_set():
+    ok, reason = problems_ok("make problems from the section", [WORKED], OK_SET)
+    assert ok is True
+
+
+def test_problems_ok_rejects_no_solution():
+    bad = "PROBLEM 1\nQuestion: u=0?  (no solution key)"
+    ok, reason = problems_ok("make problems", [WORKED], bad)
+    assert ok is False
+    assert "solution" in reason.lower() or "answer" in reason.lower()
+
+
+def test_problems_ok_rejects_short():
+    ok, reason = problems_ok("make problems", [WORKED], "hi")
+    assert ok is False
 
 

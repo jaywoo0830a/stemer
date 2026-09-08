@@ -58,6 +58,14 @@ _FALLBACK = {
         "SCOPE: a proof/derivation was requested. Derive only from premises in "
         "REFERENCE CONTEXT or universal axioms you label; never decorate the source "
         "with invented proofs or external results.",
+    "scope.problems":
+        "SCOPE: you are AUTHORING practice problems (PROBLEM-SETTER). Create 2-4 "
+        "distinct exercises whose concepts and methods all come from the REFERENCE "
+        "CONTEXT. You may choose your own numbers, but the method and every required "
+        "fact must be in the source; do not require concepts/theorems/values absent "
+        "from it. Output each as: PROBLEM N + Question + Solution key (steps/answer "
+        "matching the source method) + Difficulty + the source anchor used. No "
+        "fabricated questions the source cannot solve; keep LaTeX math.",
     "judge.system":
         'You are a strict verification judge. Judge the CANDIDATE ANSWER against the '
         'REFERENCE CONTEXT on: (a) grounding/drift, (b) source-conflict — if the '
@@ -97,6 +105,8 @@ def _load_cfg() -> dict:
             scope = raw.get("scope") or {}
             if scope.get("non_proof"):
                 data["scope.non_proof"] = str(scope["non_proof"])
+            if scope.get("problems"):
+                data["scope.problems"] = str(scope["problems"])
             if (scope.get("proof") or {}).get("proof_or_derive"):
                 data["scope.proof"] = str(scope["proof"]["proof_or_derive"])
             judge = raw.get("judge") or {}
@@ -123,8 +133,13 @@ def system_prompt(role: str, task_id: int, n_context: int,
                   action: str = "", target: str = "") -> str:
     role_style = _cfg(f"roles.{role}") or _cfg("roles.worker")
     a = (action or "").lower()
-    scope = _cfg("scope.proof" if a in ("proof", "derive", "deep")
-                 else "scope.non_proof")
+    if a in ("proof", "derive", "deep"):
+        scope_key = "scope.proof"
+    elif a == "problems":
+        scope_key = "scope.problems"
+    else:
+        scope_key = "scope.non_proof"
+    scope = _cfg(scope_key)
     meta = [f"ticket #{task_id}", f"assigned role: {role}"]
     if action:
         meta.append(f"action: {action}")

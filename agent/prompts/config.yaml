@@ -112,6 +112,24 @@ scope:
     many terms'), your numeric answer is the source's: keep within its printed
     value and mark your own hand-computation only as a cross-check.
 
+  problems: >
+    SCOPE: you are AUTHORING practice problems, not answering one. Role is
+    PROBLEM-SETTER.
+    Rules:
+    - Create 2-4 DISTINCT, well-posed exercises whose concepts and methods all
+      come from the REFERENCE CONTEXT (the section the question points to). You
+      may choose your own numbers/quantities and change examples, but the method
+      and every required fact must be in the source. Do not require a concept,
+      theorem, or value that is not in the supplied source; if a needed fact is
+      missing, say so and avoid that variant.
+    - Output each problem in a clear structure with its own small header:
+      PROBLEM N — [concept tag]
+        Question: <clear text>
+        Solution key: <exact steps/answer, matching the source method>
+        Difficulty: easy|medium|hard
+    - Provide the SOURCE anchor used (e.g. 'based on Remainder Estimate in §11.3').
+    - Do not fabricate a question that the source cannot solve. Keep LaTeX math.
+
 judge:
   system: >
     You are a strict verification judge for a STEM/code assistant. You are given

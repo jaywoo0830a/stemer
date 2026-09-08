@@ -150,6 +150,10 @@ class Orchestrator:
                                             task_action=task.action,
                                             task_target=task.target)
 
+        is_problems = (task.action or "").strip().lower() == "problems"
+        correct = (grounding.problems_correction_prompt if is_problems
+                   else grounding.correction_prompt)
+
         def mk(out, *, ok=True, note="", judge_role="", codes=()):
             return WorkerResult(task=task.id, role=role, url=srv.url, output=out,
                                 grounded=ok, grounding_note=note,
@@ -159,21 +163,34 @@ class Orchestrator:
         last_reason = "verification failed"
         try:
             for attempt in range(1 + self.grounding_retries):
-                user = original_user if attempt == 0 else grounding.correction_prompt(
-                    qtext, chunks, last_reason)
-                out = gw.chat(system=system, user=user, max_tokens=2000)
+                user = original_user if attempt == 0 else correct(qtext, chunks,
+                                                                  last_reason)
+                out = gw.chat(system=system, user=user, max_tokens=2500)
 
-                # Tier-1 (무료, 결정론): 온토픽 + (숫자 질문이면) source 워크드 답 대조
+                # Tier-1 (무료, 결정론)
+                #  - 답 유형: 온토픽 + (숫자 인트) source 워크드 답 대조
+                #  - 출제 유형: 구조 검증(문제+해답 유) — 숫자 앵커는 안 겁(신규 수용)
                 ok1, r1 = grounding.lexical_ok(qtext, chunks, out)
-                okN, rN = grounding.numeric_anchor_check(qtext, chunks, out)
-                tier_ok, tier_reason = (ok1 and okN,
-                                        (r1 if not ok1 else rN))
+                if is_problems:
+                    okP, rP = grounding.problems_ok(qtext, chunks, out)
+                    okN, rN = True, "n/a (problem mode)"
+                    tier_ok = ok1 and okP
+                else:
+                    okP, rP = True, ""
+                    okN, rN = grounding.numeric_anchor_check(qtext, chunks, out)
+                    tier_ok = ok1 and okN
+                tier_reason = r1 if not ok1 else (rP if not okP else rN)
                 if not tier_ok:
                     last_reason = tier_reason
                     if attempt < self.grounding_retries:
                         continue                      # 교정 프롬프트로 재시도
                     return mk(out, ok=False,
                               note=f"rejected x{self.grounding_retries + 1}: {last_reason}")
+
+                # 출제는 '단일 정답 인용'이 아니라 생성이므로 답-정답 판사는 거치지
+                # 않고, 구조+개념-근거(Tier1) 통과로 수용 (출제 전용 교정은 위).
+                if is_problems:
+                    return mk(out, ok=True, note=f"problem set accepted ({tier_reason})")
 
                 # Tier-2 (판사): 근거·참·오류·예외 — source 강제
                 verdict = self._judge(qtext, chunks, out, role)

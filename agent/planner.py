@@ -113,6 +113,10 @@ def _classify(heading: str, content: str) -> tuple[str, str]:
     hl = heading.lower()
     cl = content.lower()
     # 1) 명시 헤더 action Authority
+    if any(k in hl for k in ("problems", "problem set", "exercise", "exercises",
+                             "practice", "make problems", "문제", "출제",
+                             "generate problems", "worksheet")):
+        return "problems", "worker"
     if any(k in hl for k in ("fix", "bug", "bugfix", "patch", "error")):
         return "fix", "coder"
     if any(k in hl for k in ("code", "implement", "implementing", "refactor", "write code")):
@@ -129,6 +133,8 @@ def _classify(heading: str, content: str) -> tuple[str, str]:
 
     # 2) 본문 보조 (라벨이 없거나 모호할 때). 'theorem' 은 proof 신호에서 제외.
     body_rules = [
+        (("problems", "exercise", "practice", "worksheet", "make up a", "create a problem"),
+         "problems", "worker"),
         (("proof", "prove", "derive", "derivation", "rigor"), "proof", "reasoner"),
         (("deep dive", "verify"), "deep", "reasoner"),
         (("fix", "bug", "bugfix", "patch", "indexerror"), "fix", "coder"),

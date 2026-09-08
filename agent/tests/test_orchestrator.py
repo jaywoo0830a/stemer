@@ -204,3 +204,35 @@ def test_grounding_gate_exhausts_marks_ungrounded():
     assert "rejected x3" in res[0].grounding_note
 
 
+# --- 출제(problems) 경로: 구조 gate만 통과·숫자 앵커 생략 (신규 생성 수용) -------
+PROBSET = """PROBLEM 1 — [Integral Test]
+Question: Decide convergence of Σ_{n=1}^{∞} 1/sqrt(n) by the Integral Test.
+Solution key: ∫_1^∞ x^{-1/2} dx diverges; hence series diverges.
+Difficulty: easy
+
+PROBLEM 2 — [Remainder Estimate]
+Question: For Σ 1/n^3 use R_n ≤ 1/(2 n^2); find n so the error < 0.001.
+Solution key: 1/(2 n^2) < 0.001 → n ≥ 23 (use the source's method).
+Difficulty: medium
+"""
+
+
+def test_problems_action_accepted_via_structure_gate():
+    """numbers 가 source 의 '32'와 달라도(신규 출제) 문제모드로 수용돼야 한다."""
+    class ProbTransport(FakeTransport):
+        def post_text(self, url, body, timeout):
+            return {"choices": [{"message": {"role": "assistant", "content": PROBSET}}]}
+
+    reg = Registry()
+    orch = Orchestrator(registry=reg, rag=_StubRag([TWO]),
+                        gateway_factory=lambda url, role: Gateway(
+                            base_url=url, transport=ProbTransport()))
+    res, _ = orch.run_tasks(
+        [Task(id=1, action="problems",
+              input="make 2 practice problems from the Integral Test section",
+              role="worker")], write=False)
+    assert res[0].ok and res[0].grounded is True
+    assert "problem set accepted" in res[0].grounding_note
+
+
+

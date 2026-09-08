@@ -114,6 +114,49 @@ def numeric_anchor_check(question: str, chunks: Sequence[Chunk],
                    f"worked value(s) {_uniq(anchors)}")
 
 
+# --- 출제(문제 만들기) 구조 검증 (결정론) — 답-인용 게이트와 다른 역할 ------
+_PROBLEM_HDR = re.compile(r"(?m)^\s*(?:##\s*Problem\b|###? Problem\b|PROBLEM\s*\d|"
+                          r"Q[1-9]?\.?\s|Question\s*[0-9:]+|문제\s*[0-9]*\s*[:：]?)",
+                          re.IGNORECASE)
+_SOLUTION_MARK = re.compile(r"(solution|풀이|답|answer|key|sol\.?\s*[:：]|Solution key)",
+                            re.IGNORECASE)
+
+
+def problems_ok(question: str, chunks: Sequence[Chunk], answer: str) -> tuple[bool, str]:
+    """생성형 결과가 최소 1+ 문제 + 각각 해법/앵커를 갖는지 (구조 최소)."""
+    text = (answer or "").strip()
+    if empty_or_too_short(answer):
+        return False, "answer empty or too short for problems"
+    # 문제 헤더 갯수 (동일 문제 여러 단락도 충분히 감지)
+    n_prob = len(list(_PROBLEM_HDR.finditer(text))) or (1 if "question" in text.lower()
+                                                        or "문제" in text else 0)
+    if n_prob < 1:
+        return False, "no PROBLEM/question blocks found"
+    if not _SOLUTION_MARK.search(text):
+        return False, "problems missing solution/answer keys"
+    # source 개념 근거를 하나라도 갖는지(leak 방지: 아예 동떨어지면 reject)
+    ok, reason = lexical_ok(question, chunks, text)
+    if not ok:
+        return False, reason
+    return True, f"problems ok (≥{n_prob})"
+
+# 출제 전용 교정 프롬프트 (인용-재현이 아니라 '출제 지침' 강조)
+def problems_correction_prompt(question, chunks, reason) -> str:
+    block = "\n\n".join(f"[{c.source} / {c.section}]\n{c.text}" for c in chunks)
+    return (
+        f"Your generated problem set was REJECTED.\nReason: {reason}\n\n"
+        "PROBLEM-SETTER STRICT RULES:\n"
+        "- Produce 2-4 well-posed problems whose concepts and methods come ONLY "
+        "from the reference below; you may choose new numbers but each required "
+        "fact must appear in the reference.\n"
+        "- For EVERY problem give: PROBLEM N — [concept], Question, Solution key "
+        "(exact steps/answer using the source method), Difficulty.\n"
+        "- Never invent a theorem/rule/number the source cannot support.\n\n"
+        "ORIGINAL REQUEST:\n" + question.strip() + "\n\n"
+        "REFERENCE CONTEXT (concepts only):\n" + block
+    )
+
+
 # 교정 재시도 프롬프트 (judge 의 reason 을 받아 '원문 그대로 재현' 강제)
 def correction_prompt(question: str, chunks: Sequence[Chunk], reason: str) -> str:
     block = "\n\n".join(f"[{c.source} / {c.section}]\n{c.text}" for c in chunks)
