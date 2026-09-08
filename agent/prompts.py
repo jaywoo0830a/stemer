@@ -52,23 +52,43 @@ ROLE_STYLE: dict[str, str] = {
 # 공통 제약(모든 역할) — 질문 치환 방지 + 근거 정직성
 _COMMON = (
     "ABSOLUTE RULES (must obey):\n"
-    "1. Answer the EXACT question asked. Never replace it with a different but "
-    "similar problem. If asked to explain a property (e.g. why an integral over a "
-    "symmetric interval is 0), address exactly that property and its conditions, "
-    "not a bare antiderivative.\n"
+    "1. Answer the EXACT question asked, and ONLY what it asks. Never replace it "
+    "with a different but similar problem, never give a bare antiderivative when "
+    "a symmetric-zero property is asked, and never volunteer a proof or extra "
+    "topic unless the question explicitly asks to 'prove' / 'derive'.\n"
     "2. Treat REFERENCE CONTEXT as your primary source. When a reference chunk "
-    "states an explicit theorem/formula/bound, REPRODUCE it VERBATIM (symbols, "
-    "limits, conditions exactly as printed). Do NOT paraphrase, simplify, re-derive, "
-    "or write a different version of what the source states.\n"
-    "3. When the context is absent or irrelevant, explicitly say '(general "
+    "states an explicit theorem/formula/bound/NUMBER, REPRODUCE it VERBATIM "
+    "(symbols, limits, conditions, and values exactly as printed). Do not "
+    "paraphrase, simplify, re-derive, or write a different version of what the "
+    "source states, and do not add material that is not shown in the source.\n"
+    "3. NUMERIC/HAND-WORK: if the source shows a worked example whose result is "
+    "a number (e.g. 'need 32 terms', '= 1/200'), and the question is about that "
+    "kind of quantity, your answer must AGREE with the source's printed value. "
+    "Redo every substitution/inequality carefully in steps; if your self-computed "
+    "number differs from the source's printed one, recompute, and if it still "
+    "differs, present the source value as authoritative and flag the discrepancy.\n"
+    "4. When the context is absent or irrelevant, explicitly say '(general "
     "derivation — no study source)' — never claim textbook provenance you do not have.\n"
-    "4. Do not invent citations, theorem/page numbers, data, or bounds.\n"
-    "5. Show reasoning step by step; state uncertainty.\n"
-    "6. Respond in markdown; math in LaTeX; concise but complete.\n"
+    "5. Do not invent citations, theorem/page numbers, data, bounds, or numbers.\n"
+    "6. Show reasoning step by step; state uncertainty.\n"
+    "7. Respond in markdown; math in LaTeX; concise but complete.\n"
 )
 
 
-# --------------------------------------------------------------------------- #
+def _scope_rule(action: str) -> str:
+    """action 이 '증명/유도' 가 아니면 과잉 증명·확장을 금지(문제#1 회귀 가드)."""
+    a = (action or "").lower()
+    if a in ("proof", "derive", "deep"):
+        # 증명 요청이면 그래도 source 밖으로 확장 금지 메시지만 강조
+        return ("SCOPE: a proof/derivation is requested — still derive ONLY from "
+                "what the source states; do not add external theorems as if from the source.")
+    return ("SCOPE: this is an EXPLAIN/QUOTE/STATE task. Report the fact, theorem, "
+            "bound, or worked value EXACTLY as the source presents it. Do NOT "
+            "over-produce: do not append a proof, a general derivation, extra "
+            "examples, or added cases that the source does not show and the "
+            "question does not ask for. Keep the answer inside the question's scope.")
+
+
 def system_prompt(role: str, task_id: int, n_context: int,
                   action: str = "", target: str = "") -> str:
     meta: list[str] = [f"ticket #{task_id}", f"assigned role: {role}"]
@@ -79,7 +99,7 @@ def system_prompt(role: str, task_id: int, n_context: int,
     head = "You are handling " + ", ".join(meta) + "."
     return (head + "\n\n" + ROLE_STYLE.get(role, ROLE_STYLE["worker"])
             + f"\n\nYou will see {n_context} reference chunk(s) below if any.\n\n"
-            + _COMMON)
+            + _scope_rule(action) + "\n\n" + _COMMON)
 
 
 def _sym_condition_note(question: str) -> str:

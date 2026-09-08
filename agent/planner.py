@@ -99,22 +99,49 @@ def split_plan(plan: str) -> list[Task]:
 
 
 def _classify(heading: str, content: str) -> tuple[str, str]:
-    """헤더+본문 키워드로 (action, role) 결정 (기본 explain/worker)."""
-    blob = (heading + " " + content).lower()
-    rules = [
-        (("proof", "derive", "prove", "theorem", "derive"), "proof", "reasoner"),
-        (("deep dive", "deep-dive", "verify", "rigorous"), "deep", "reasoner"),
-        (("fix", "bug", "bugfix", "patch", "error", "indexerror"), "fix", "coder"),
-        (("code", "implement", "write", "function", "refactor"), "code", "coder"),
-        (("review", "optimize", "profile"), "review", "coder"),
-        (("concept", "explain", "why", "intuition"), "explain", "worker"),
-        (("search", "find", "locate", "similar", "equivalent"), "search", "worker"),
-        (("summar", "summary", "summarize"), "summary", "worker"),
+    """(action, role) 결정. 우선순위: 사용자가 명시한 헤더 라벨 > 본문 힌트.
+
+    [Task N: <action>] 에 명시된 action 이 있으면 그것을 Authority 로 본다:
+      - explain/concept/quote/summary → worker  (본문에 'Theoreme' 등이 있어도
+        자체가 '증명해라'가 아니면 reasoner 로 승격하지 않는다 — test#1 회귀)
+      - fix/bug/patch → coder
+      - code/implement/refactor → coder
+      - proof/derive/rigorous → reasoner
+    헤더에 action 이 애매/없으면 본문 키워드로 보조 추론하되, 본문 'theorem' 은
+    자동 증명으로 승격시키는 신호로 쓰지 않는다(재구성/과잉 증명 방지).
+    """
+    hl = heading.lower()
+    cl = content.lower()
+    # 1) 명시 헤더 action Authority
+    if any(k in hl for k in ("fix", "bug", "bugfix", "patch", "error")):
+        return "fix", "coder"
+    if any(k in hl for k in ("code", "implement", "implementing", "refactor", "write code")):
+        return "code", "coder"
+    if any(k in hl for k in ("review", "optimize")):
+        return "review", "coder"
+    if any(k in hl for k in ("proof", "prove", "derive", "deriving", "rigor",
+                             "rigorous", "deep dive")):
+        return "proof", "reasoner"
+    # worker-family 라벨 — 본문의 'Theorem' 등을 봐도 reasoner 로 안 올림
+    if any(k in hl for k in ("explain", "concept", "quote", "intuition", "summar",
+                             "summarize", "why", "when", "describe", "state")):
+        return "explain", "worker"
+
+    # 2) 본문 보조 (라벨이 없거나 모호할 때). 'theorem' 은 proof 신호에서 제외.
+    body_rules = [
+        (("proof", "prove", "derive", "derivation", "rigor"), "proof", "reasoner"),
+        (("deep dive", "verify"), "deep", "reasoner"),
+        (("fix", "bug", "bugfix", "patch", "indexerror"), "fix", "coder"),
+        (("implement", "refactor"), "code", "coder"),
+        (("search", "find", "locate", "similar"), "search", "worker"),
+        (("summar",), "summary", "worker"),
+        (("explain", "concept", "why is", "intuition"), "explain", "worker"),
     ]
-    for kws, action, role in rules:
-        if any(k in blob for k in kws):
+    for kws, action, role in body_rules:
+        if any(k in cl for k in kws):
             return action, role
     return "explain", "worker"
+
 
 
 def _guess_target(text: str) -> str | None:
