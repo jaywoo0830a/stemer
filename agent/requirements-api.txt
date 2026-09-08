@@ -1,0 +1,9 @@
+# agent 웹 API 전용 의존성 (graphic: study/requirements.txt 와는 별개)
+# 실행: pip install -r agent/requirements-api.txt
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
+httpx>=0.27
+# rag StudyStoreRetriever 로 study store + ollama 임베딩을 쓰는 경우
+# yaml 로 registry 설정(agent/config/agent.yaml)을 읽는 경우(선택)
+pyyaml>=6.0

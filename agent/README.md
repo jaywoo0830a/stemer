@@ -51,10 +51,30 @@ ssh -N -L 8081:127.0.0.1:8081 -L 8088:127.0.0.1:8088 ubuntu@192.99.201.121
 # 여러 포트: 8081..8088 전부 −L
 ```
 
+## WEB API (FastAPI) — agent/api.py
+동기 `POST /run-plans` 로 계획서 한 건 → 병렬 에이전트 → `notes/*.md` + JSON.
+기본 mock(오프라인)이 아닌 **live 기본**이라 서버에서 띄우면 실제 llama/Ollama 를 부른다.
+
+```bash
+# 의존성 (웹)
+study/.venv/bin/python -m pip install -r agent/requirements-api.txt
+
+# 서버에서 실행 (실제 추론 서버) — live 기본
+study/.venv/bin/python -m uvicorn agent.api:app --host 0.0.0.0 --port 8000
+
+# 간단 사용
+curl -X POST localhost:8000/run-plans -H 'Content-Type: application/json' \
+  -d '{"plan":"[Task 1: explain] why integral of sin(wx) on symmetric interval is zero"}'
+curl localhost:8000/health
+```
+
+로컬/오프라인 데모(서버 안 부를 때)는 `live=False` 로 앱을 만들어 `TestClient` 로 검증한다.
+
 ## 테스트
 ```bash
 cd /home/rlawjddn/projects/stemer
-python -m pytest agent/tests -q      # 40 tests (네트워크/서버 없이 통과)
+python -m pytest agent/tests -q      # 40 tests (네트워크/서버 없이 통과; test_api 는 web deps 없으면 skip)
+study/.venv/bin/python -m pytest agent/tests -q   # fastapi 설치된 venv → api 계약 포함 전체
 ```
 계약(fake transport/retriever) 테스트라 실제 llama/ollama 를 띄우지 않아도 되고,
 `test_*_match_myllm` 이 실서버 myllm 포트 매핑이 어긋나면 실패시켜 회귀를 막는다.

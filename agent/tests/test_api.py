@@ -1,0 +1,60 @@
+"""api — 웹 API(endpoint) 계약. fastapi/starlette 있는 환경에서만 실행(skip guard).
+
+run:
+    python -m pytest agent/tests -q            # 없으면 test_api 자동 skip
+    study/.venv/bin/python -m pytest agent/tests -q   # 웹 deps 가 있을 때 전체
+"""
+from __future__ import annotations
+
+import pytest
+
+try:
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+    from agent.api import create_app
+    HAVE_API = True
+except Exception:  # noqa: BLE001 — fastapi 미설치 환경 skip
+    HAVE_API = False
+
+
+pytestmark = pytest.mark.skipif(not HAVE_API, reason="fastapi/starlette not installed")
+
+
+@pytest.fixture
+def client(tmp_path):
+    app = create_app(live=False, note_dir=str(tmp_path))
+    return TestClient(app), tmp_path
+
+
+def test_health_reports_mock_mode(client):
+    c, _ = client
+    h = c.get("/health").json()
+    assert h["ok"] is True
+    assert h["mode"] == "mock"
+    assert {"parser", "worker", "coder", "reasoner", "embed"} <= set(h["roles"])
+
+
+def test_split_plans(client):
+    c, _ = client
+    body = {"plan": "[Task 1: explain] why zero symmetric\n[Task 2: fix] idx bug"}
+    j = c.post("/split-plans", json=body).json()
+    assert j["ok"] is True
+    assert [(t["id"], t["role"]) for t in j["tasks"]] == [(1, "worker"), (2, "coder")]
+
+
+def test_run_plans_returns_file_and_markdown(client):
+    c, tmp = client
+    j = c.post("/run-plans", json={
+        "plan": "[Task 1: explain] sine integral\n[Task 2: proof] orthogonality"}).json()
+    assert j["total"] == 2 and j["ok_count"] == 2 and j["mode"] == "mock"
+    assert [t["role"] for t in j["tasks"]] == ["worker", "reasoner"]
+    # 파일이 실제 저장됨
+    assert (tmp / (j["stem"] + ".md")).exists()
+    assert "Task 1" in j["markdown"] and "Task 1" in j["markdown"]
+
+
+def test_run_plans_error_surface_for_bad_payload(client):
+    """빈 plan 은 pydantic min_length=1 로 422 (앱 크래시 없이 검증 거부)."""
+    c, _ = client
+    r = c.post("/run-plans", json={"plan": "", "use_parser": False})
+    assert r.status_code == 422
