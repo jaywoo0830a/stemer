@@ -199,11 +199,10 @@ _EN_KICK = (
     "finish every example and every solution completely before stopping."
 )
 
-# 각 부분의 per-request 생성 상한(Phi-4 ctx 16384 autoregressive).
-# 하나의 complete() = 한 요청은 ctx 를 못 넘지만, 목록형은 _COUNTED/_SPEC 배치로
-# 여러 항목을 여러 요청에 걸쳐 누적 생성한다(_LIST_PER_SHOT 참고). 예제 5 · 문제
-# (10b/5s/5c) 목표가 여러 배치로 채워진다. 자유 길이 산출을 위해 넉넉히 둔다.
-_PART_MAX = {"concept": 7000, "examples": 9000, "practice": 11000}
+# 각 부분의 per-request 생성 상한(Phi-4 ctx 131072 autoregressive).
+# 하나의 complete() = 한 요청. 목록형은 _COUNTED/_SPEC 배치로 다회 누적해 항목을 채운다.
+# 128k 여유라 요청당 길게 뽑아도 되지만 목표(examples 5 · practice 20)는 명시 수 유지.
+_PART_MAX = {"concept": 30000, "examples": 32000, "practice": 36000}
 
 # --- 개수·난이도 목록형 부분을 '여러 요청'으로 쪼개 누적 생성 ---
 # 단일 요청에서 R1 은 첫 마커 하나 만들고 완결한다(실측). ctx 가 작아 한 번에 N개
@@ -235,7 +234,7 @@ _SPEC = {
             "asks for; number them continuously (do not restart numbering).\n"),
     },
 }
-_LIST_PER_SHOT = 4     # 요청당 목록 개수 — 16k 생성 여백 내 여러 개를 한 요청에
+_LIST_PER_SHOT = 8     # 요청당 목록 개수 — 128k 생성 여백 내 여러 개를 한 요청에
 
 
 def _count_markers(body: str, marker: str) -> int:
@@ -458,21 +457,21 @@ def run_free_parts(topic, llm, passages, notes_dir: str | Path,
     return str(combined)
 
 
-# ---- 문맥 예산 (Phi-4-mini-reasoning / llama-server, ctx 16384) ----
-# autoregressive. 한 요청은 prompt+생성 합이 CTX_LIMIT 안이어야 하므로, passage 예산
-# 은 'CTX - 시스템(스케폴드) - 생성 예비'로 유도하고 큰창에 맞춰 넉넉하게 둔다.
-CTX_LIMIT = 16384
+# ---- 문맥 예산 (Phi-4-mini-reasoning / llama-server, ctx 131072=128k 운영) ----
+# autoregressive. model native 최대 131072 까지이므로 큰 교재 생성 시 여백 크게.
+# 한 요청은 prompt+생성 합 ≤ CTX_LIMIT. passage 예산 = CTX - 스캐폴드 - 생성예비.
+CTX_LIMIT = 131072
 MAX_INPUT = CTX_LIMIT
 HARD_CTX = MAX_INPUT
-_SCAFFOLD_EST = 1200         # 시스템 헤더+토픽(Phi-4 정상 autoregressive)
-_MIN_GEN_RESERVE = 5000      # 남길 최소 생성 여백 (긴 해설용)
-DEFAULT_INPUT_TOKENS = 6000  # passage 기본(필요 시 env LOCAL_FREE_INPUT_TOKENS)
+_SCAFFOLD_EST = 1536           # 시스템 헤더+토픽
+_MIN_GEN_RESERVE = 20000       # 최소 생성 예비 (긴 해설용 — 128k 여유 기준)
+DEFAULT_INPUT_TOKENS = 24000   # passage 기본(필요 시 env LOCAL_FREE_INPUT_TOKENS 상향)
 
 
 def input_budget() -> int:
     """한 요청에 실을 passage 입력 예산.
 
-    autoregressive llama: prompt + 생성 합이 CTX_LIMIT(16384) 안이어야 하므로
+    autoregressive llama: prompt + 생성 합이 CTX_LIMIT(131072) 안이어야 하므로
     passage 상한 = CTX_LIMIT - _SCAFFOLD_EST - _MIN_GEN_RESERVE. 기본/기본env 는
     DEFAULT_INPUT_TOKENS 이며 넘지 않는 선에서 LOCAL_FREE_INPUT_TOKENS 로 조정.
     """
@@ -543,7 +542,7 @@ _PART_KEYWORDS = {
     "examples": ["example", "sample", "solution", "예제", "예 ", "worked"],
     "practice": ["exercise", "problem", "practice", "연습", "문제", "#7", "#24"],
 }
-_DEFAULT_PART_TOKENS = 4000     # 각 part passage 예산 (16k 대비 — 권고안 B/B)
+_DEFAULT_PART_TOKENS = 10000     # 각 part passage 예산 (128k 대비)
 
 
 def _part_score(part: str, text: str) -> int:
