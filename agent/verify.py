@@ -143,7 +143,7 @@ class LlmVerifier:
         user = self._build_message(question, chunks, answer)
         try:
             data = self._gw.chat_json(system=self._system or JUDGE_SYSTEM,
-                                      user=user, max_tokens=1200)
+                                      user=user, max_tokens=300)
         except GatewayError:
             # 판사 서버 장애/응답불가 → '미판정(deferred)' 으로 명시(하드 실패 대신).
             return Verdict(ok=True, grounded=True,

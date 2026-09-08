@@ -44,6 +44,25 @@ class _ProblemsRetry(Exception):
 ResultWriter = Callable[[str, str], Path]  # (markdown, stem) -> path
 
 
+# NEW-METHOD 응답 토큰 정책 — 역할/행동별 출력 상한을 경량화해 무한 장문 차단.
+#  - worker 계열(설명/요약): 억제(몇 문장)
+#  - coder 계열(코드/수정/리뷰): 코드 블록만큼
+#  - reasoner 계열(증명/심화): 비교적 길게
+#  - problems(출제+코드): Setter 급으로 가장 넉넉 (문제셋 + Sympy 블록)
+def _token_budget(role: str, action: str) -> int:
+    a = (action or "").lower()
+    r = (role or "").lower()
+    if a in ("problems", "problem", "exercise", "generate"):
+        return 2400
+    if r == "coder" or a in ("code", "fix", "review", "refactor"):
+        return 1400
+    if r == "reasoner" or a in ("proof", "derive", "deep"):
+        return 2000
+    # worker 계열 기본 — 예시·장문 대신 핵심만 (설명은 상세~50단어급)
+    return 900
+
+
+
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
@@ -180,7 +199,8 @@ class Orchestrator:
             for attempt in range(1 + self.grounding_retries):
                 user = original_user if attempt == 0 else correct(qtext, chunks,
                                                                   last_reason)
-                out = gw.chat(system=system, user=user, max_tokens=2500)
+                out = gw.chat(system=system, user=user,
+                              max_tokens=_token_budget(role, task.action))
 
                 # Tier-1 (무료, 결정론)
                 #  - 답 유형: 온토픽 + (숫자 인트) source 워크드 답 대조

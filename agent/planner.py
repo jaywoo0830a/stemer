@@ -202,7 +202,7 @@ class PlanParser:
         from .prompts import PARSER_SYSTEM
         try:
             obj = self.gateway.chat_json(system=PARSER_SYSTEM,
-                                         user=plan, max_tokens=1200)
+                                         user=plan, max_tokens=400)
         except GatewayError:
             if self.allow_fallback:
                 return []
