@@ -192,3 +192,31 @@ def test_substitute_results_fills_placeholder():
     assert "final" in out or "0.5" in out
 
 
+# ---- COUNTER-CONTRADICTION: 'runs but fails to give real finite indexed result' ----
+def test_run_gate_rejects_run_without_numeric_value():
+    """블록이 '실행 성공'했지만 Symbol/EmptySet 같은 수치 아닌 값을 내면
+    손으로 답을 달은 것과 같으므로 inconsistent_result 하드 거부."""
+    p = ("PROBLEM 1\nQuestion: Find smallest n so R_n < 0.0005\n"
+         "Solution key: n=45\n"
+         "```python\nfrom sympy import *\nn = symbols('n')\nprint(n)   # Symbol, no number\n```")
+    g = S.run_gate(p)[0]
+    assert g.hard_code == "inconsistent_result"
+
+
+def test_run_gate_rejects_non_positive_index():
+    """index/count 를 묻는데 출력이 ≤0 이면 전제 모순(remainder/부등식 오류)."""
+    p = ("PROBLEM 1\nQuestion: Find the smallest n\nSolution key: n=-2\n"
+         "```python\nfrom sympy import *\nprint(-2)\n```")
+    g = S.run_gate(p)[0]
+    assert g.hard_code == "inconsistent_result"
+
+
+def test_run_gate_accepts_positive_value_non_index():
+    """값 문제(부등식 결정 아님)에서 양의 유한 실수는 정상 통과."""
+    p = ("PROBLEM 1\nQuestion: compute the sum value\nSolution key: sum=0.5\n"
+         "```python\nfrom sympy import *\nprint(Rational(1,2))\n```")
+    g = S.run_gate(p)[0]
+    assert g.hard is None
+
+
+

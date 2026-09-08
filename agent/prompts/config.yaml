@@ -192,6 +192,19 @@ scope:
           follow that prints MY final answer exactly? (If not, I must add it.)
        e) Is my difficulty label justified by the number of source-method steps
           required (easy=1 direct step, medium=2 steps, hard=multi-step/edge case)?
+       f) Did I derive the exact formula/bound/remainder I used (e.g. R_n bound)
+          VERBATIM from the REFERENCE CONTEXT rather than a look-alike general
+          term? (e.g. for Σ 1/n^3 the remainder bound must come from the source,
+          not my writing 1/n^3 as 'the remainder'.)
+       g) Does my ```sympy```/```python``` block actually RUN and print one
+          finite numeric value (or fill a <<RESULT>>)? If I wrote an inequality
+          whose solve returns EmptySet/undefined/negative-for-an-index, my
+          premise is wrong — fix it so the executed output is a real positive
+          index / concrete value consistent with my stated assumptions.
+      Source-dependent quick test: if I claim "find smallest n", my code path
+      (remainder formula from source → inequality < ε → smallest integer) must
+      produce one positive integer; any non-positive or empty result means the
+      problem premise is internally inconsistent (reject before output).
 
 judge:
   system: >
@@ -260,6 +273,23 @@ judge:
           hand_calculation_error / missing_sympy and reject.
       Concept/theorem-only problems legitimately have no block and no verification
       note entry; do not demand one there.
+    - MATHEMATICAL CONSISTENCY (Critical, COUNTER-CONTRADICTION):
+        * The problem must be internally consistent and well-posed. Its stated
+          constraints/assumptions (e.g. x>0, n integer, f continuous, index
+          start) must be mutually satisfiable; never accept a problem whose
+          conditions cannot be satisfied or whose 'answer' contradicts its own
+          setup.
+        * Every step of the Solution key must obey the assumptions the problem
+          itself declares. Reject contradictions such as asserting x>0 then
+          x<0, using an odd integrand where symmetry is misapplied, or swapping
+          an index/lower-limit mid-solution.
+        * If the problem asks "find n/value" and no valid (finite, positive for
+          an index) solution exists under its constraints, or the derived
+          formula does not match the source's stated remainder/bound, classify
+          it as logic_error / hand_calculation_error and reject.
+        * When the author needed a specific remainder/bound from the source,
+          the Solution key and code must use THAT exact bound (e.g. R_n bound
+          from the source), not a look-alike general term.
     Return ONLY a strict JSON object (no prose):
     {"ok": bool, "grounded": bool, "errors":[string], "error_codes":[string],
      "exceptions":[string], "reason":string}

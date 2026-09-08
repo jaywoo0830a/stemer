@@ -20,6 +20,7 @@ sympy 미설치: run 은 unavailable → 호출 측이 no_sympy 로 처리(수�
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -45,7 +46,7 @@ _FORBIDDEN_SUBSTR = (
     "globals()", "locals()", "compile(", "type(",
 )
 _NUM_TOKEN = re.compile(
-    r"(?<![\d._a-zA-Z])(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?![\d._a-zA-Z])")
+    r"(?<![\w.-])(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?![\w.])")
 # 유리수 'a/b' 출력(예: Rational 을 print 시 '5/4') 을 한 값으로 잡는 토큰
 _FRAC_TOKEN = re.compile(r"(?<!\d)(\d+)\s*/\s*(\d+)(?![\d.])")
 # 출력에서 최종 수치 값 후보로 읽을 이름들 (마지막 할당 우선)
@@ -299,6 +300,34 @@ _TARGET_IMPERATIVE = re.compile(
 _digits = re.compile(r"\d")
 
 
+# --- COUNTER-CONTRADICTION: 논리/수치 일관성 보조 (결정론) --------------------
+# 하드 의존성 없이(순수 float) 판단 가능한 '수학 모순'을 잡는 primitives.
+# 고급(조건 충족 가능성/SMT)은 LLM 판사(mat. consistency 축)와 선택적 sympy
+# 솔버 계층에 위임하되, 실행 출력의 명백한 무효(invalid/EmptySet/non-finite/
+# 답-자리 부정 등)는 여기서 즉시 하드 거부한다.
+
+
+def _isfinite(v: Optional[float]) -> bool:
+    """float 가 유한한 값인지(NaN/Inf 제외)."""
+    if v is None:
+        return False
+    try:
+        return math.isfinite(float(v))
+    except (TypeError, ValueError):
+        return False
+
+
+def _category(question: str, solution: str) -> str:
+    """문제 맥락 분류(가벼움): index/count 답을 요구하는지 vs 참/부등식 결정."""
+    t = f"{question or ''} {solution or ''}".lower()
+    if re.search(r"\b(find|smallest|least|how many|which n|terms|fewest|"
+                 r"index|first .* terms)\b", t):
+        return "index"
+    if re.search(r"\b(is .* (larger|smaller)|compare|which|true or false)\b", t):
+        return "bool"
+    return "value"
+
+
 
 @dataclass
 class BlockGate:
@@ -390,15 +419,46 @@ def run_gate(problem_set: str) -> List[ProblemGate]:
         #     일치해야 한다(수동 계산 drift 차단 = value_mismatch).
         if has_ph:
             vals = [b.value for b in ok_runs if b.value is not None]
-            if not vals:
+            finite_vals = [v for v in vals if _isfinite(v)]
+            if not finite_vals:
                 g.hard = ("execution_error: <<RESULT>> used but no numeric value "
                           "was produced by the code block")
                 g.hard_code = "execution_error"
+            elif (_category(piece, "") == "index"
+                  and not any(v > 0 for v in finite_vals)):
+                g.hard = ("inconsistent_result: <<RESULT>> problem asks for an "
+                          "index/count n, but block yields only non-positive values")
+                g.hard_code = "inconsistent_result"
             else:
-                g.placeholder_value = vals[-1]
+                g.placeholder_value = finite_vals[-1]
+            out.append(g)
+            continue
+        # B 경로(숫자를 직접 적음): 코드가 실제 '수치'를 하나라도 내는지 확인.
+        # 실행은 '성공'했는데 print 가 기호/EmptySet/정의되지 않은 값을 내면 value=None
+        # → 그 문제는 손으로 답을 달 뿐 코드로 검증되지 않았다. (COUNTER-CONTRADICTION:
+        #    '해 없음/미정의' 도 확정 수치 기만이므로 하드 거부)
+        produced = [b.value for b in ok_runs if b.value is not None]
+        finite = [v for v in produced if _isfinite(v)]
+        if not finite:
+            g.hard = ("inconsistent_result: executed block produced no finite "
+                      "numeric value (undefined/EmptySet/empty solve) yet a "
+                      "definite numeric answer is asserted")
+            g.hard_code = "inconsistent_result"
+            out.append(g)
+            continue
+        # COUNTER-CONTRADICTION: '가장 작은 n/몇 개/찾아라' 류는 양의(종종 정수)
+        # index 가 답이어야 한다. 코드가 전부 0 이하(또는 비양수)만 내면 문제·풀이
+        # 전제(remainder 나감, 올바른 부등식)와 모순 → 하드 거부.
+        if _category(piece, "") == "index" and not any(v > 0 for v in finite):
+            g.hard = ("inconsistent_result: question asks for an index/count n, "
+                      "but the block produces only non-positive numbers "
+                      "(wrong inequality/remainder premises)")
+            g.hard_code = "inconsistent_result"
             out.append(g)
             continue
         for b in ok_runs:
+            if b.value is not None and not _isfinite(b.value):
+                continue
             if b.value is not None and not solution_has_value(piece, b.value):
                 vfmt = (int(b.value) if abs(b.value - round(b.value)) < 1e-9
                         else f"{b.value:.10g}")

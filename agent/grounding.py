@@ -228,7 +228,15 @@ def problems_correction_prompt(question, chunks, reason) -> str:
         "(execution_error), or a Solution-key number that differs from the code's "
         "output (value_mismatch, e.g. writing 45 when code computes 32) is "
         "rejected automatically with no judge. Concept-only problems omit the "
-        "block.\n\n"
+        "block.\n"
+        "COUNTER-CONTRADICTION (consistency): the exact remainder/bound/formula "
+        "you use MUST be lifted VERBATIM from the REFERENCE CONTEXT below (for "
+        "Σ 1/n^3 the remainder bound is what the source prints — do NOT pretend "
+        "the general term 1/n^3 is the remainder). If 'find smallest n/terms', "
+        "your block must produce ONE positive finite integer; a block that prints "
+        "a Symbol, returns EmptySet, or outputs ≤0 means your premise is "
+        "inconsistent — correct the inequality/formula so execution yields that "
+        "positive n.\n\n"
         "ORIGINAL REQUEST:\n" + question.strip() + "\n\n"
         "REFERENCE CONTEXT (concepts only):\n" + block
     )
