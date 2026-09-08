@@ -79,3 +79,40 @@ def test_count_mismatches_no_block_and_broken_block():
               "```sympy\n1/0\n```")
     mm = S.count_mismatches(broken)
     assert mm and mm[0]["block_ok"] is False
+
+
+def test_python_fence_block_is_executed_too():
+    """모델이 ```python``` 펜스로 계산 블록을 낼 때도 실행해 broken 코드를 잡는다
+    (```sympy``` 전용으로 뽑으면 'no_sympy_block' advisory 로 새어 LLM 판사가 통과시킴)."""
+    live_model_output = (
+        "PROBLEM 1 — [Remainder Estimate]\n"
+        "Question: find smallest n so R_n of sum 1/n^3 < 0.0005\n"
+        "Solution key: n=32\n"
+        "```python\n"
+        "from sympy import symbols, integrate, oo, Rational\n"
+        "n = symbols('n', real=True, positive=True)\n"
+        "integral_expr = integrate(1/x**3, (x, n, oo))   # x 미정의 -> NameError\n"
+        "print(n)\n"
+        "```\n"
+        "Difficulty: medium")
+    mm = S.count_mismatches(live_model_output)
+    # 실행 시도했고(no_sympy_block 아님) 실행 오류 → block_ok False
+    assert mm and mm[0]["block_ok"] is False
+    assert mm[0]["reason"] != "no_sympy_block"
+    assert "execution error" in mm[0]["reason"] or "forbidden" in mm[0]["reason"]
+
+
+def test_python_fence_drift_detected():
+    text = ("PROBLEM 1\nQuestion: compute n\nSolution key: n=45\n"
+            "```python\nfrom sympy import *\n"
+            "print(ceiling(sqrt(1000)))\n```")
+    mm = S.count_mismatches(text)
+    assert mm and mm[0]["block_ok"] is True
+    assert mm[0]["computed"] == 32
+    assert mm[0]["found_in_solution"] is False
+
+
+def test_extract_code_blocks_covers_python_fence():
+    text = "```sympy\nx=1\n``` then ```python\ny=2\n```"
+    assert S.extract_code_blocks(text) == ["x=1", "y=2"]
+

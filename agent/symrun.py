@@ -71,6 +71,17 @@ def extract_blocks(text: str, *, sympy_only: bool = True) -> List[str]:
     return [m.group(1).strip() for m in pat.finditer(text or "")]
 
 
+def extract_code_blocks(text: str) -> List[str]:
+    """검증 대상 코드 블록: ```sympy``` 와 ```python``` **둘 다** 뽑는다.
+
+    출제 모델이 종종 ```sympy``` 대신 ```python``` 펜스로 계산 블록을 내므로,
+    검증 게이트(손계산 드리프트 탐지)는 python 펜스를 외면해 broken 코드/가짜
+    수치가 통과하는 우회를 막기 위해 두 펜스를 모두 실행 후보로 본다. (그렇지
+    않으면 'python 펜스로 써서 실행 안 됨' → no_sympy_block advisory → LLM 판사
+    가 코드를 실제 실행 없이 통과시켜버림.)"""
+    return [m.group(1).strip() for m in _FENCE_BOTH.finditer(text or "")]
+
+
 DEFAULT_TIMEOUT = 8.0  # 초
 
 
@@ -183,8 +194,9 @@ def run_block(code: str, *, timeout: float = DEFAULT_TIMEOUT) -> BlockResult:
 
 
 def run_problems_blocks(text: str) -> List[BlockResult]:
-    """문제셋 본문 전체에서 모든 ```sympy``` 블록을 실행해 리스트로 반환."""
-    return [run_block(c) for c in extract_blocks(text)]
+    """문제셋 본문 전체에서 모든 코드 블록(```sympy```/```python```)을 실행해
+    리스트로 반환."""
+    return [run_block(c) for c in extract_code_blocks(text)]
 
 
 # --- 결정론 비교: 손계산 드리프트 탐지 ---------------------------------------
@@ -236,7 +248,7 @@ def count_mismatches(problem_set: str) -> List[dict]:
     blocks = split_problem_blocks(problem_set)
     out = []
     for idx, blk in enumerate(blocks):
-        code_res = [run_block(c) for c in extract_blocks(blk)]
+        code_res = [run_block(c) for c in extract_code_blocks(blk)]
         if not code_res:
             # 수치 문제인데 sympy 블록 없음 — 여기서는 '탐지 불가'(무해) 표기만,
             # 판사(LLM)와 결합해 missing_sympy 로 처리.
