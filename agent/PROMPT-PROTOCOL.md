@@ -50,27 +50,36 @@ judge:   { system: ... }
 parser:  { system: ... }
 ```
 
-## 4. 판사 스키마 (verify)
+## 4. 판사 스키마 (verify, v2 — 단일 소스에 정의)
 판사 응답은 반드시 JSON:
 ```json
-{"ok": bool, "grounded": bool, "errors": [str], "exceptions": [str], "reason": str}
+{"ok": bool, "grounded": bool, "errors": [string], "error_codes": [string],
+ "exceptions": [string], "reason": string}
 ```
-- `ok=false` 가 되는 조건: (a) 근거 drift/창작, (b) **source-conflict** — reference 의
-  인쇄 사실/숫자와 답이 모순/오버라이드 (test#2), (c) 답이 안 물어본 예외/숫자/증명 추가.
-- 판사 서버가 응답 못 하면 `Verdict(ok=true, grounded=true, reason='judge unreachable …')`
-  로 **deferred**(하드 차단 대신 명시) — 오경보보다 availability 우선이지만 로그로 확인.
+- `error_codes` 열거: `missing_source_value`, `mismatch_source_value`,
+  `extra_claim`, `ungrounded_statement`, `scope_violation`, `other`.
+- `ok=false` 조건: (a) drift/창작, (b) **source-conflict**(reference 의 인쇄 숫자/조건과
+  답이 모순/오버라이드 — test#2), (c) 안 물어본 예외/숫자/증명 추가,
+  (d) 요구된 source 값을 답이 빠뜨림.
+- 판사가 응답 못 하면 `Verdict(ok=true, grounded=true, judge_role, source='deferred')`
+  **deferred(명시 통과)** — 오경보 대신 availability 우선.
+- 응답 필드/Tier 산출: 각 worker 지시 결과 JSON의 `tasks[].judge_role`, `error_codes[]`,
+  `grounded`, `grounding_note` 로 판사가 정말 거부했는지/어느 code 인지 추적 가능(청구 게이트).
 
 ## 5. 튜닝 방법(언제든 개선)
-1. `agent/prompts/config.yaml` 편집 (프롬프트 문구만).
+1. `agent/prompts/config.yaml` 편집 (프롬프트 문구만 — 프로토콜 데이터를 개선).
 2. 테스트: `cd /home/rlawjddn/projects/stemer && study/.venv/bin/python -m pytest agent/tests -q`
 3. 서버 반영: `docker build -f docker/agent-gateway.Dockerfile -t agent-gateway:latest . &&
    bash server-down.sh && bash server-up.sh`
-4. 그 밖 로직(role 매핑, 숫자 앵커 하드차단, 재시도 횟수)은 코드가 담당 — 문서 하단 참조.
+4. 그 밖 로직(role 매핑/개수 등)은 코드 담당. 숫자/근거 하드게이트는 `grounding.numeric_anchor_check`
+   및 orchestrator의 Tier1+Tier2 재시도(소진 시 UNGROUNDED) 가 책임.
 
-## 6. 알려진 한계/다음 개선 후보(결정 사항 아님)
-- **숫자 self-check 를 판사 단독에 의존**: 현재는 판사 프롬프트에 "인쇄 숫자와 대조" 규칙.
-  더 단단히 하려면 `numeric_anchor` 하드 gate(청크에 "need 32 terms" 류가 있을 때 최종
-  숫자 불일치 자동 reject) 후보.
-- 공식/Theorem 요청은 worker(짧·인용) vs 진짜 proof 는 reasoner — 라벨 기반으로 잘 되나,
-  본문만 있고 라벨 없을 때 분류 미세 조정 가능.
-- 판사 지연/CPU: grounding_retries·삽입 판사 빈도를 조절.
+## 6. 구현된 하드 게이트 + 남은 후보
+- ✅ **numeric_anchor(구현)**: 질문이 수치/개수 인트이고 source 에 워크드 숫자(예
+  'need 32 terms')가 있으면, 답 숫자가 그 source 값과 하나라도 일치하지 않으면
+  **결정론적 reject** → 교정 재시도(판사와 무관하게, 판사 꺼도 동작). test#2용 방어 레이어.
+- ✅ **판사 평결 관측성**: `TaskOut.judge_role/error_codes/grounded/grounding_note`
+  됨 (deferred면 `notewith 'judge unreachable'` 표기 가능).
+- 후보: theorem/quote는 worker, 진짜 proof는 reasoner 세분(라벨 기반은 되나, 라벨 없는
+  본문 분류만 미세조정 여지). 판사 지연/CPU 는 grounding_retries·디버깅 빈도로 조절.
+

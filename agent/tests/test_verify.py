@@ -10,8 +10,16 @@ from agent.tests._fakes import FakeTransport
 
 
 def test_judge_system_forces_json_schema():
-    assert '{"ok": bool' in JUDGE_SYSTEM
+    import re
+    flat = re.sub(r"\s+", " ", JUDGE_SYSTEM)
+    # 스키마 유도: ok/grounded/errors/error_codes 가 와야 하고, strict JSON 지시 포함.
+    assert '"ok": bool' in flat
+    assert '"grounded": bool' in flat
+    assert '"errors":' in flat
+    assert '"error_codes":' in flat      # v2 판사가 내보내는 분류 코드(stable)
     assert "Return ONLY a strict JSON object" in JUDGE_SYSTEM
+    # source-authority 가 판사에도 실려 있는지 (fidelity 핵심)
+    assert "authoritative" in JUDGE_SYSTEM.lower()
 
 
 def test_pick_judge_reasoner_for_worker():

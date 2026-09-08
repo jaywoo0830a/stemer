@@ -45,6 +45,8 @@ class WorkerResult:
     sources: tuple[str, ...] = ()
     grounded: bool = True       # grounding gate 통과 여부 (틀 이탈 없음)
     grounding_note: str = ""
+    judge_role: str = ""        # 판사 역할(e.g. reasoner8088) / 없으면 ""
+    error_codes: tuple[str, ...] = ()  # 판사 분류 코드(v2: missing_source_value 등)
 
     @property
     def ok(self) -> bool:
@@ -148,6 +150,12 @@ class Orchestrator:
                                             task_action=task.action,
                                             task_target=task.target)
 
+        def mk(out, *, ok=True, note="", judge_role="", codes=()):
+            return WorkerResult(task=task.id, role=role, url=srv.url, output=out,
+                                grounded=ok, grounding_note=note,
+                                judge_role=judge_role, error_codes=tuple(codes),
+                                sources=tuple(c.source for c in chunks))
+
         last_reason = "verification failed"
         try:
             for attempt in range(1 + self.grounding_retries):
@@ -155,52 +163,59 @@ class Orchestrator:
                     qtext, chunks, last_reason)
                 out = gw.chat(system=system, user=user, max_tokens=2000)
 
-                # Tier-1 (무료, 네트워크 없음): 완전 drift/빈 답 조기 배제
+                # Tier-1 (무료, 결정론): 온토픽 + (숫자 질문이면) source 워크드 답 대조
                 ok1, r1 = grounding.lexical_ok(qtext, chunks, out)
-                if not ok1:
-                    last_reason = r1
+                okN, rN = grounding.numeric_anchor_check(qtext, chunks, out)
+                tier_ok, tier_reason = (ok1 and okN,
+                                        (r1 if not ok1 else rN))
+                if not tier_ok:
+                    last_reason = tier_reason
                     if attempt < self.grounding_retries:
-                        continue
+                        continue                      # 교정 프롬프트로 재시도
+                    return mk(out, ok=False,
+                              note=f"rejected x{self.grounding_retries + 1}: {last_reason}")
 
-                # Tier-2 (LLM 판사): 근거 기반 참/거짓·오류·예외
+                # Tier-2 (판사): 근거·참·오류·예외 — source 강제
                 verdict = self._judge(qtext, chunks, out, role)
-                if ok1 and verdict.ok and verdict.grounded:
-                    return WorkerResult(task=task.id, role=role, url=srv.url,
-                                        output=out, grounded=True,
-                                        sources=tuple(c.source for c in chunks))
-                # 실패 사유 → 재시도, 소진되면 UNGROUNDED
-                last_reason = (verdict.human if not verdict.ok else
-                               "not grounded: " + (verdict.reason or r1))
+                if verdict.ok and verdict.grounded:
+                    if verdict.source == "deferred":
+                        note = ("judge unreachable -> deferred; passed Tier-1 "
+                                "(lexical+numeric) only")
+                    else:
+                        note = ""
+                    return mk(out, ok=True, note=note,
+                              judge_role=verdict.judge_role,
+                              codes=verdict.error_codes)
+                # 판사 거부 → 사유/코드 기록 후 재시도 또는 UNGROUNDED
+                last_reason = verdict.human
+                last_codes = verdict.error_codes
                 if attempt < self.grounding_retries:
                     continue
-                return WorkerResult(
-                    task=task.id, role=role, url=srv.url, output=out,
-                    grounded=False,
-                    grounding_note=(
-                        f"rejected x{self.grounding_retries + 1}: {last_reason}"),
-                    sources=tuple(c.source for c in chunks))
+                return mk(out, ok=False, note=(f"rejected x{self.grounding_retries + 1}: "
+                                               f"{last_reason}"),
+                          judge_role=verdict.judge_role, codes=last_codes)
         except GatewayError as exc:
             return WorkerResult(task=task.id, role=role, url=srv.url, error=str(exc))
         raise RuntimeError("unreachable")  # noqa: B904  (guard)
 
     def _judge(self, qtext, chunks, out: str, role: str):
-        """Tier-2 평결. verifier 를 구성하면 다른(엄격한) 모델에게 심판시키고,
-        없으면 Tier1(lexical) 결과로 통과(비용 0). 근거가 있는데 판사가 없으면
-        엄밀도가 떨어지므로 'no judge' 사유를 적어 둔다.
-        """
+        """Tier-2 평결. verifier 구성 시 다른(엄격한) 모델이 심판. 없으면
+        'tier1' 평결(source='tier1', 항상 accept; 엄밀성은 진단 source 로 남김)."""
         if self.verifier is not None:
             return self.verifier.verify(qtext, chunks, out)
         if self._verifier_factory is not None:
             try:
                 v = self._verifier_factory(role)
-            except Exception:  # noqa: BLE001 — 판사 서버 부재 시 Tier1 로 폴백
+            except Exception:  # noqa: BLE001 — 판사 서버 부재 시 tier1 로 폴백
                 v = None
             if v is not None:
                 return v.verify(qtext, chunks, out)
         from agent.verify import Verdict
         if chunks:
-            return Verdict(ok=True, grounded=True, reason="no judge; Tier1 only")
-        return Verdict(ok=True, grounded=True, reason="free answer (no source)")
+            return Verdict(ok=True, grounded=True, reason="no judge; Tier-1 only",
+                           source="tier1")
+        return Verdict(ok=True, grounded=True, reason="free answer (no source)",
+                       source="tier1")
 
 
 def _default_factory(url: str, role: str) -> Gateway:

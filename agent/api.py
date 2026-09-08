@@ -66,6 +66,8 @@ class TaskOut(BaseModel):
     sources: List[str] = []
     grounded: bool = True
     grounding_note: str = ""
+    judge_role: str = ""
+    error_codes: List[str] = []
 
 
 class RunPlanResponse(BaseModel):
@@ -215,7 +217,9 @@ def _to_response(results: Sequence[WorkerResult], path, stem: str,
     tasks = [TaskOut(task=r.task, role=r.role, url=r.url, ok=r.ok,
                      output=r.output, error=r.error, sources=list(r.sources),
                      grounded=getattr(r, "grounded", True),
-                     grounding_note=getattr(r, "grounding_note", ""))
+                     grounding_note=getattr(r, "grounding_note", ""),
+                     judge_role=getattr(r, "judge_role", ""),
+                     error_codes=list(getattr(r, "error_codes", ())))
              for r in results]
     return RunPlanResponse(
         stem=stem, note_path=str(path) if path else "", markdown=markdown,

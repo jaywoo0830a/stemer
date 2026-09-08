@@ -34,13 +34,17 @@ class Verdict:
     ok: bool                # 수락 여부 (표면 충실도 + 판사 허용)
     grounded: bool          # 근거 기반 & 참  (판사가 grounded 이상)
     reason: str = ""
-    errors: List[str] = field(default_factory=list)      # 판사가 잡은 오류
+    errors: List[str] = field(default_factory=list)      # 판사가 잡은 오류(사람-판독)
     exceptions: List[str] = field(default_factory=list)  # 답이 만든 '예외/경우' 검증
+    error_codes: List[str] = field(default_factory=list)  # 판사 분류 코드(stable)
     judge_role: str = ""
+    source: str = "llm"     # llm | stub | deferred | tier1
 
     @property
     def human(self) -> str:
         parts = [self.reason] + [f"err: {e}" for e in self.errors]
+        if self.error_codes:
+            parts.append("codes: " + ",".join(self.error_codes))
         if self.exceptions:
             parts.append("unchecked-exceptions: " + ", ".join(self.exceptions))
         return " | ".join(p for p in parts if p)
@@ -92,12 +96,12 @@ class LlmVerifier:
                answer: str) -> Verdict:
         user = self._build_message(question, chunks, answer)
         try:
-            data = self._gw.chat_json(system=JUDGE_SYSTEM, user=user, max_tokens=800)
+            data = self._gw.chat_json(system=JUDGE_SYSTEM, user=user, max_tokens=1200)
         except GatewayError:
-            # 판사 서버 장애/응답불가 → '미판정' 으로 통과시키되 명시 (하드 실패 대신)
+            # 판사 서버 장애/응답불가 → '미판정(deferred)' 으로 명시(하드 실패 대신).
             return Verdict(ok=True, grounded=True,
                            reason="judge unreachable; verdict deferred",
-                           judge_role=self.judge_role)
+                           judge_role=self.judge_role, source="deferred")
         return self._parse(data)
 
     def _build_message(self, question, chunks, answer) -> str:
@@ -115,13 +119,21 @@ class LlmVerifier:
             grounded = bool(data.get("grounded", ok))
             errs = data.get("errors") or []
             excs = data.get("exceptions") or []
+            codes = data.get("error_codes") or []
             reason = str(data.get("reason", "") or "")
             return Verdict(ok=ok, grounded=grounded, reason=reason,
-                           errors=list(errs) if isinstance(errs, list) else [str(errs)],
-                           exceptions=list(excs) if isinstance(excs, list) else [],
-                           judge_role=self.judge_role)
+                           errors=_as_list(errs), exceptions=_as_list(excs),
+                           error_codes=_as_list(codes), judge_role=self.judge_role)
         return Verdict(ok=False, grounded=False, reason="judge reply not a dict",
                        judge_role=self.judge_role)
+
+
+def _as_list(x) -> list:
+    if isinstance(x, list):
+        return [str(v) for v in x]
+    if isinstance(x, (str, int, float)):
+        return [str(x)]
+    return []
 
 
 class StubVerifier:
@@ -129,8 +141,16 @@ class StubVerifier:
 
     def __init__(self, verdict: Optional[Verdict] = None,
                  trace: Optional[list] = None) -> None:
-        self._v = verdict or Verdict(ok=True, grounded=True,
-                                     reason="stub accept", judge_role="stub")
+        base = Verdict(ok=True, grounded=True, reason="stub accept",
+                       judge_role="stub", source="stub")
+        if verdict is not None:
+            base = Verdict(ok=verdict.ok, grounded=verdict.grounded,
+                           reason=verdict.reason, errors=list(verdict.errors),
+                           exceptions=list(verdict.exceptions),
+                           error_codes=list(verdict.error_codes),
+                           judge_role=verdict.judge_role or "stub",
+                           source="stub")
+        self._v = base
         self.trace = trace if trace is not None else []
 
     def verify(self, question, chunks, answer) -> Verdict:

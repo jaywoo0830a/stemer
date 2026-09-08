@@ -17,6 +17,12 @@ from .rag import Chunk
 
 _LATEX_FRAG = re.compile(r"\\[a-zA-Z]+\s*[\w{}\\^+*/=<\]]{2,90}")
 
+
+def _uniq(vals):
+    """소수점 표기 제거 후 오름차 정렬 표현 (진단 메시지용)."""
+    uniq = sorted({round(float(v), 6) for v in vals})
+    return [int(x) if float(x).is_integer() else x for x in uniq]
+
 # LLM judge(verify.py) 가 검증 전에 '너무 짧아 근거 불가'로 볼 최소 길이
 MIN_ANSWER_CHARS = 40
 
@@ -50,6 +56,62 @@ def lexical_ok(question: str, chunks: Sequence[Chunk], answer: str) -> tuple[boo
         if any(f in text for f in re.findall(_LATEX_FRAG, c.text) if len(f) >= 8):
             return True, "shares LaTeX fragment with a source"
     return False, "answer is off-topic (shares nothing with any supplied source)"
+
+
+# --- 결정론적 숫자 앵커 (워크드 답과 최종 답 대조) — LLM 산술 실수에 안 지는 하드 gate --
+_NUM = re.compile(r"\d+(?:\.\d+)?")
+_OUTCOME_WORDS = re.compile(
+    r"(terms|need|require|required|approx|about|more than|at least|"
+    r"at most|equals?|is about|=|within|cannot|can't|not covered)",
+    re.IGNORECASE)
+_INTENT_WORDS = re.compile(
+    r"(how many|terms|approxim|within|find\s+n|value of|what|equals?|"
+    r"should be|error|to within)",
+    re.IGNORECASE)
+
+
+def anchor_values(chunks: Sequence[Chunk]) -> list[float]:
+    """결과줄(terms/need/…/within)에 나온 숫자 → source 의 워크드 앵커 값."""
+    out: list[float] = []
+    for c in chunks:
+        for line in c.text.splitlines():
+            if not _OUTCOME_WORDS.search(line):
+                continue
+            for tok in _NUM.findall(line):
+                try:
+                    out.append(float(tok))
+                except ValueError:
+                    continue
+    return out
+
+
+def numeric_anchor_check(question: str, chunks: Sequence[Chunk],
+                         answer: str) -> tuple[bool, str]:
+    """답의 숫자가 source 의 워크드 숫자와 하나라도 겹치는지(결정론).
+
+    - 질문이 수치/개수 인트이고 source 에 앵커(결과 숫자)가 있을 때만 체크.
+    - 앵커가 없으면 통과. 답이 'not covered' 로 회피하면 통과(단, 인용 요구 상실).
+    - 앵커가 있는데 답의 어떤 숫자와도 안 겹치면 False (오답 조기 차단).
+    """
+    anchors = anchor_values(chunks)
+    if not anchors:
+        return True, "no numeric anchor"
+    if not _INTENT_WORDS.search(question):
+        return True, "question not numeric-intent"
+    low = (answer or "").lower()
+    if ("not covered" in low or "not present" in low
+            or "no source" in low or "cannot say" in low):
+        return True, "answer defers to absence (no explicit numeric assertion)"
+    ans_nums = [float(t) for t in _NUM.findall(answer or '')
+                if t.replace('.', '1', 1).replace('-', '', 1).lstrip('0').isdigit()]
+    if not ans_nums:
+        return False, (f"answer has no number but source prints worked value(s) "
+                       f"{_uniq(anchors)}")
+    for a in anchors:
+        if any(abs(x - a) < 1e-6 for x in ans_nums):
+            return True, "numeric anchor matched"
+    return False, (f"answer value(s) {_uniq(ans_nums)} disagree with source "
+                   f"worked value(s) {_uniq(anchors)}")
 
 
 # 교정 재시도 프롬프트 (judge 의 reason 을 받아 '원문 그대로 재현' 강제)
