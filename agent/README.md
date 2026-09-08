@@ -70,6 +70,20 @@ curl localhost:8000/health
 
 로컬/오프라인 데모(서버 안 부를 때)는 `live=False` 로 앱을 만들어 `TestClient` 로 검증한다.
 
+## Docker 로 웹 서버 띄우기 (권장 — 서버 실사용)
+**myllm 이 띄운 llama/Ollama(8081-8088/11434)는 호스트 프로세스라서** 컨테이너는
+`network_mode: host` 로 호스트의 그 포트들을 그대로 본다(study 컨테이너와 동일 관례).
+
+```bash
+bash server-up.sh      # 이미지 빌드(없으면)+ 기동 → http://localhost:8000
+bash server-down.sh    # 정지/제거 (notes 는 ./agent-notes 에 유지)
+```
+- 기본 **live**(실제 추론). 오프라인 echo 데모는 `AGENT_MODE=mock bash server-up.sh`.
+- 역할 주소 재정의: `AGENT_PARSER/WORKERS/CODERS/REASONER/EMBED`(CSV).
+- 파일: `docker/agent-gateway.Dockerfile`, `docker-compose.agent.yml`,
+  `server-up.sh`, `server-down.sh`, `.dockerignore`.
+- 재빌드: `docker build -f docker/agent-gateway.Dockerfile -t agent-gateway:latest .`
+
 ## 테스트
 ```bash
 cd /home/rlawjddn/projects/stemer

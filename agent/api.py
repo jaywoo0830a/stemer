@@ -26,6 +26,7 @@ create_app(live=False)                               # MockGateway echo
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -80,16 +81,23 @@ class RunPlanResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 def create_app(
     *,
-    live: bool = True,
+    live: Optional[bool] = None,
     registry: Optional[Registry] = None,
     rag=None,
     rag_k: int = 4,
-    note_dir: str | Path = "notes",
+    note_dir: str | Path | None = None,
     mock_echo: bool = True,
 ) -> FastAPI:
-    """FastAPI 앱. live=True → 실제 llama/Ollama, False → MockGateway(echo)."""
+    """FastAPI 앱.
+
+    live: True → 실제 llama/Ollama, False → MockGateway(echo),
+          None(기본) → env AGENT_MODE (mock|live, 기본 live).
+    note_dir: 결과 저장 디렉터리. None → env AGENT_NOTES_DIR, 없으면 'notes'.
+    """
+    if live is None:
+        live = os.environ.get("AGENT_MODE", "live").strip().lower() != "mock"
     reg = registry or load_registry()
-    note_dir = str(note_dir)
+    note_dir = str(note_dir or os.environ.get("AGENT_NOTES_DIR", "notes"))
     Path(note_dir).mkdir(parents=True, exist_ok=True)
 
     if live:

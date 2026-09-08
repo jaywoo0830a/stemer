@@ -1,0 +1,14 @@
+# root-context docker build(docker/agent-gateway.Dockerfile) 용 — 이미지 최소화
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/venv/
+**/.git/
+notes/
+agent/data/
+study/data/
+data/
+*.log
+*.pid
+.DS_Store
+nohup.out

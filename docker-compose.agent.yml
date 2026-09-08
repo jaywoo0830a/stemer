@@ -1,0 +1,32 @@
+# agent API(멀티에이전트 웹) — docker compose 사용(추천) 또는 docker-compose.agent.yml up
+#   서버(192.99.201.121)에서 LLM 들(myllm llama 8081-8088 + Ollama 11434)이
+#   호스트 프로세스로 떠 있으므로 `network_mode: host` 로 컨테이너가 그대로 본다.
+#   - API 는 호스트의 8000 포트로 노출.
+#   - 기본 live 모드 = 실제 추론 서버 호출 (오프라인은 AGENT_MODE=mock).
+#
+# 사용:
+#   bash server-up.sh
+#   bash server-down.sh
+services:
+  gateway:
+    image: agent-gateway:latest
+    build:
+      context: .
+      dockerfile: docker/agent-gateway.Dockerfile
+    container_name: agent-gateway
+    network_mode: host        # 127.0.0.1:8081-8088 / 11434 이 호스트 것 그대로
+    restart: unless-stopped
+    volumes:
+      # 결과 notes 영속 (호스트 ./agent-notes)
+      - ./agent-notes:/app/notes
+      # (선택) 텍스트 RAG 근거 store — 호스트 study/data/store 를 꽂으려면 활성화:
+      # - ./study/data/store:/data/store
+    environment:
+      # live(실제 llama/Ollama) | mock(오프라인 echo 데모)
+      AGENT_MODE: ${AGENT_MODE:-live}
+      # role 주소 기본값은 agent/registry.py (127.0.0.1:8081-8088). 필요 시 오버라이드:
+      # AGENT_PARSER / AGENT_WORKERS / AGENT_CODERS / AGENT_REASONER / AGENT_EMBED(CSV)
+      # AGENT_EMBED: ${AGENT_EMBED:-http://127.0.0.1:11434}
+      # study store 경로(book-store rag 요청 시 사용)
+      STEMER_STORE: ${STEMER_STORE:-}
+    ports: []                 # host network 라 포트 매핑 불필요
