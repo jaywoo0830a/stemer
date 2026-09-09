@@ -37,7 +37,7 @@ bash docker/run.sh generate --topic 미적분-11-1
 
 # 2) agent API (루트에서)
 bash server-up.sh
-curl localhost:8000/health
+curl localhost:18080/health
 ```
 
 자세한 명령어·운영 순서·모듈 설명은 **`OPERATION.md`** 참고.

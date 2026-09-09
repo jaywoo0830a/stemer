@@ -52,25 +52,32 @@ def strip_thinking(text: str) -> str:
 
 
 class Transport(Protocol):
-    """HTTP 호출 추상화 — 실제는 httpx, 테스트는 in-memory fake."""
+    """HTTP 호출 추상화 — 실제는 httpx, 테스트는 in-memory fake.
 
-    def post_json(self, url: str, body: dict, timeout: float) -> dict: ...
-    def post_text(self, url: str, body: dict, timeout: float) -> Any: ...
+    headers 는 선택(기본 None) — myllm(Bearer 토큰) 등 인증 호출에서 사용.
+    """
+
+    def post_json(self, url: str, body: dict, timeout: float,
+                  headers: Optional[dict] = None) -> dict: ...
+    def post_text(self, url: str, body: dict, timeout: float,
+                  headers: Optional[dict] = None) -> Any: ...
 
 
 class _HttpxTransport:
     """기본 구현 — httpx.Client (선택 의존성, 실제 배포에서만)."""
 
-    def post_json(self, url: str, body: dict, timeout: float) -> dict:
+    def post_json(self, url: str, body: dict, timeout: float,
+                  headers: Optional[dict] = None) -> dict:
         import httpx  # 선택 의존성
-        with httpx.Client(timeout=timeout) as c:
+        with httpx.Client(timeout=timeout, headers=headers) as c:
             r = c.post(url, json=body)
         if r.status_code >= 400:
             raise GatewayError(f"HTTP {r.status_code} on {url}: {r.text[:200]}")
         return r.json()
 
-    def post_text(self, url: str, body: dict, timeout: float) -> Any:
-        return self.post_json(url, body, timeout)
+    def post_text(self, url: str, body: dict, timeout: float,
+                  headers: Optional[dict] = None) -> Any:
+        return self.post_json(url, body, timeout, headers=headers)
 
 
 class Gateway:

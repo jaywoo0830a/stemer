@@ -25,4 +25,5 @@ COPY study/study_lib ./study/study_lib
 
 # host network 로 127.0.0.1:8081-8088 / 11434 을 그대로 사용
 # (역할 주소는 기본값 또는 env AGENT_* 로 오버라이드)
-CMD ["python", "-m", "uvicorn", "agent.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# agent API 포트 = 18080 (myllm Script Runner 가 8000 을 쓰므로 전용)
+CMD ["python", "-m", "uvicorn", "agent.api:app", "--host", "0.0.0.0", "--port", "18080"]

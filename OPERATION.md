@@ -25,7 +25,7 @@
   ║  [B] myllm : 로컬 LLM 서버들(8081~8090, Ollama 11434) 띄움       ║
   ║                                                                  ║
   ║  [C] agent API (docker, host network)                           ║
-  ║      http://localhost:8000 ← RAG store 근거로 추론/질문           ║
+  ║      http://localhost:18080 ← RAG store 근거로 추론/질문           ║
   ╚══════════════════════════════│═══════════════════════════════════╝
 ```
 
@@ -101,8 +101,12 @@ bash docker/run.sh problembank --topic 미적분-11-1     # 연습문제 세트 
 
 agent API가 떠 있어야 함(`server-up.sh`). 방금 accumulate로 채운 청크를 근거로 recall:
 
+> 자동 모델 부팅(live 기본): `/run-plans` 진입 시 myllm Script Runner로 항시 모델
+> (parser/worker/coder/reasoner)을 `start_all` 하고, 문제 출제(problems) 가 있으면
+> 14B setter 를 `start_heavy` 로 켠다 (DOC/1·DOC/2). 끄려면 `AGENT_BOOT_MODELS=0`.
+
 ```bash
-curl -s -X POST http://127.0.0.1:8000/run-plans -H 'Content-Type: application/json' \
+curl -s -X POST http://127.0.0.1:18080/run-plans -H 'Content-Type: application/json' \
   -d '{"plan":"[Task 1: explain] <여기에 질문>","rag":"store"}'
 ```
 
@@ -226,11 +230,11 @@ bash docker/run.sh topics discover --book X
 
 ### agent API
 ```bash
-bash server-up.sh                    # 서버에서 → http://localhost:8000
-curl localhost:8000/health
-curl -X POST localhost:8000/run-plans -H 'Content-Type: application/json' \
+bash server-up.sh                    # 서버에서 → http://localhost:18080
+curl localhost:18080/health          # myllm(모델기동) 구성·자동부팅 상태 포함
+curl -X POST localhost:18080/run-plans -H 'Content-Type: application/json' \
   -d '{"plan":"[Task 1: explain] ..질문..","rag":"store"}'
-curl -X POST localhost:8000/split-plans -H 'Content-Type: application/json' -d '{"plan":".."}'
+curl -X POST localhost:18080/split-plans -H 'Content-Type: application/json' -d '{"plan":".."}'
 bash server-down.sh
 ```
 

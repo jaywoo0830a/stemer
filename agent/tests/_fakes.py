@@ -23,16 +23,20 @@ class FakeTransport:
     raise_on: str | None = None           # "chat"|"embed" 에서 GatewayError(HTTP 장애) 재현
 
     # Transport 규약(post_json/post_text) 구현
-    def post_json(self, url: str, body: dict, timeout: float) -> dict:
-        self.calls.append({"url": url, "body": body, "transport": "json"})
+    def post_json(self, url: str, body: dict, timeout: float,
+                  headers: dict | None = None) -> dict:
+        self.calls.append({"url": url, "body": body, "transport": "json",
+                           "headers": headers})
         if self.raise_on == "embed":
             raise RuntimeError("embed backend unreachable")
         if url.endswith("/api/embed"):
             return {"embeddings": self.embed_reply or [[0.1, 0.2]]}
         return self._chat(body)
 
-    def post_text(self, url: str, body: dict, timeout: float) -> Any:
-        self.calls.append({"url": url, "body": body, "transport": "text"})
+    def post_text(self, url: str, body: dict, timeout: float,
+                  headers: dict | None = None) -> Any:
+        self.calls.append({"url": url, "body": body, "transport": "text",
+                           "headers": headers})
         if self.raise_on == "chat":
             raise RuntimeError("chat backend unreachable")
         return self._chat(body)
@@ -66,3 +70,23 @@ class FakeRetriever:
 
     def retrieve(self, query: str, k: int = 5) -> List[Chunk]:
         return self.chunks[:k]
+
+
+class FakeMyllmTransport:
+    """MyllmClient 전용 fake — body 를 돌려주고 헤더/호출을 기록한다.
+
+    url 에 해당하는 replies[key] 를 반환. key 는 '/v1/<key>' 꼴(예 'run','allowlist').
+    """
+
+    def __init__(self, replies: dict | None = None, fail: bool = False) -> None:
+        self.calls: List[dict] = []
+        self.replies = replies or {}
+        self.fail = fail
+
+    def post_json(self, url: str, body: dict, timeout: float,
+                  headers: dict | None = None) -> dict:
+        self.calls.append({"url": url, "body": body, "headers": headers})
+        if self.fail:
+            raise RuntimeError("myllm unreachable")
+        key = url.split("/v1/")[-1] if "/v1/" in url else "health"
+        return self.replies.get(key, {"ok": True, "stdout": "", "stderr": ""})

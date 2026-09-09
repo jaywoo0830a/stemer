@@ -12,6 +12,8 @@ try:
     from fastapi import FastAPI
     from starlette.testclient import TestClient
     from agent.api import create_app
+    from agent.myllm_client import MyllmClient
+    from agent.tests._fakes import FakeMyllmTransport
     HAVE_API = True
 except Exception:  # noqa: BLE001 — fastapi 미설치 환경 skip
     HAVE_API = False
@@ -58,3 +60,58 @@ def test_run_plans_error_surface_for_bad_payload(client):
     c, _ = client
     r = c.post("/run-plans", json={"plan": "", "use_parser": False})
     assert r.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# myllm(모델 기동) 연동
+# --------------------------------------------------------------------------- #
+def _myllm_client():
+    return MyllmClient(base_url="http://127.0.0.1:8000", token="secret",
+                       transport=FakeMyllmTransport())
+
+
+def test_health_exposes_myllm_config(tmp_path):
+    app = create_app(live=False, note_dir=str(tmp_path),
+                     myllm=_myllm_client(), boot_on_run=True)
+    h = TestClient(app).get("/health").json()
+    assert h["myllm"] == {
+        "configured": True,
+        "base_url": "http://127.0.0.1:8000",
+        "token_set": True,
+        "boot_on_run": True,
+    }
+
+
+def test_run_plans_boots_always_models(tmp_path):
+    m = _myllm_client()
+    app = create_app(live=False, note_dir=str(tmp_path), myllm=m,
+                     boot_on_run=True)
+    c = TestClient(app)
+    c.post("/run-plans", json={"plan": "[Task 1: explain] why zero"})
+    actions = [call["body"].get("action") for call in m._transport.calls
+               if call["url"].endswith("/v1/run")]
+    assert "start_all" in actions
+
+
+def test_run_plans_boots_setter_for_problems(tmp_path):
+    m = _myllm_client()
+    app = create_app(live=False, note_dir=str(tmp_path), myllm=m,
+                     boot_on_run=True)
+    c = TestClient(app)
+    c.post("/run-plans", json={
+        "plan": "[Task 1: problems] make a set on sequences"})
+    runs = [call["body"] for call in m._transport.calls
+            if call["url"].endswith("/v1/run")]
+    assert any(b.get("action") == "start_all" for b in runs)
+    assert any(b.get("action") == "start_heavy" and b.get("arg") == "setter"
+               for b in runs)
+
+
+def test_run_plans_no_boot_when_disabled(tmp_path):
+    m = _myllm_client()
+    app = create_app(live=False, note_dir=str(tmp_path), myllm=m,
+                     boot_on_run=False)
+    c = TestClient(app)
+    c.post("/run-plans", json={"plan": "[Task 1: explain] why zero"})
+    assert [call for call in m._transport.calls
+            if call["url"].endswith("/v1/run")] == []
