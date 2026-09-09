@@ -152,8 +152,12 @@ class LlmVerifier:
                answer: str) -> Verdict:
         user = self._build_message(question, chunks, answer)
         try:
+            # max_tokens 를 넉넉히: 판사가 이유(reasoning) 모델(R1 등)이면
+            # chain-of-thought 로 출력 토큰을 먼저 소모해 JSON 까지 못 미치고
+            # 끊긴다(finish=length → deferred). 4000 여유면 생각을 다 쓰고도
+            # JSON 을 낼 수 있다 (gateway.probe: 300→len 0, 1200+→정상).
             data = self._gw.chat_json(system=self._system or JUDGE_SYSTEM,
-                                      user=user, max_tokens=300)
+                                      user=user, max_tokens=4000)
         except GatewayError:
             # 판사 서버 장애/응답불가 → '미판정(deferred)' 으로 명시(하드 실패 대신).
             return Verdict(ok=True, grounded=True,
