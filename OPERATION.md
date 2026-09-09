@@ -14,7 +14,7 @@
 **질문 패턴 5가지 (셸 템플릿, 보고 싶은 것을 넣어 각각 실행):**
 
 ```bash
-URL=http://127.0.0.1:18080
+URL=http://127.0.0.1:8080
 q() { curl -s -X POST "$URL/run-plans" -H 'Content-Type: application/json' \
        -d "{\"plan\":\"$1\",\"rag\":\"store\"}"; }
 
@@ -43,7 +43,7 @@ q "[Task 1: problems]  Make one variant exercise by changing only the numbers of
   ╔════════════════════ 서버 ════════════════════╗
   ║  [A] study: books/ → accumulate(범위 누적) → store(RAG 청크)  ║
   ║  [B] myllm : 로컬 LLM 서버들 띄움 (모델)                    ║
-  ║  [C] agent : 18080 ← store 근거로 질문에 답 (로컬 LLM 호출)   ║
+  ║  [C] agent : 8080 ← store 근거로 질문에 답 (로컬 LLM 호출)    ║
   ╚══════════════════════════════════════════════╝
 ```
 
@@ -68,7 +68,7 @@ q "[Task 1: problems]  Make one variant exercise by changing only the numbers of
   bash docker/run.sh books add --id calc --title "Calculus" --subject math \
       --source /books/math/calc.pdf
   ```
-- 서버 기동(agent 질문용): `bash server-up.sh` → `http://localhost:18080`
+- 서버 기동(agent 질문용): `bash server-up.sh` → `http://localhost:8080`
 - 임베딩(bge-m3)은 `HF_ENDPOINT=https://hf-mirror.com`(미러), 수식은
   `DOCLING_FORMULAS=1 DOCLING_FORMULA_FP32=1`.
 
@@ -99,7 +99,7 @@ DOCLING_FORMULAS=1 DOCLING_FORMULA_FP32=1 HF_ENDPOINT=https://hf-mirror.com \
 방금 넣은 범위를 근거로 개념·예제·문제를 묻는다. **여기가 핵심**:
 
 ```bash
-URL=http://127.0.0.1:18080
+URL=http://127.0.0.1:8080
 q() { curl -s -X POST "$URL/run-plans" -H 'Content-Type: application/json' \
        -d "{\"plan\":\"$1\",\"rag\":\"store\"}"; }
 
@@ -245,11 +245,11 @@ bash docker/run.sh topics discover --book X
 
 ### agent API
 ```bash
-bash server-up.sh                    # 서버에서 → http://localhost:18080
-curl localhost:18080/health          # myllm(모델기동) 구성·자동부팅 상태 포함
-curl -X POST localhost:18080/run-plans -H 'Content-Type: application/json' \
+bash server-up.sh                    # 서버에서 → http://localhost:8080
+curl localhost:8080/health          # myllm(모델기동) 구성·자동부팅 상태 포함
+curl -X POST localhost:8080/run-plans -H 'Content-Type: application/json' \
   -d '{"plan":"[Task 1: explain] ..질문..","rag":"store"}'
-curl -X POST localhost:18080/split-plans -H 'Content-Type: application/json' -d '{"plan":".."}'
+curl -X POST localhost:8080/split-plans -H 'Content-Type: application/json' -d '{"plan":".."}'
 bash server-down.sh
 ```
 

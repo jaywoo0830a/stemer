@@ -60,12 +60,12 @@ ssh -N -L 8081:127.0.0.1:8081 -L 8088:127.0.0.1:8088 ubuntu@192.99.201.121
 study/.venv/bin/python -m pip install -r agent/requirements-api.txt
 
 # 서버에서 실행 (실제 추론 서버) — live 기본
-study/.venv/bin/python -m uvicorn agent.api:app --host 0.0.0.0 --port 18080
+study/.venv/bin/python -m uvicorn agent.api:app --host 0.0.0.0 --port 8080
 
 # 간단 사용
-curl -X POST localhost:18080/run-plans -H 'Content-Type: application/json' \
+curl -X POST localhost:8080/run-plans -H 'Content-Type: application/json' \
   -d '{"plan":"[Task 1: explain] why integral of sin(wx) on symmetric interval is zero"}'
-curl localhost:18080/health
+curl localhost:8080/health
 ```
 
 로컬/오프라인 데모(서버 안 부를 때)는 `live=False` 로 앱을 만들어 `TestClient` 로 검증한다.
@@ -75,7 +75,7 @@ curl localhost:18080/health
 `network_mode: host` 로 호스트의 그 포트들을 그대로 본다(study 컨테이너와 동일 관례).
 
 ```bash
-bash server-up.sh      # 이미지 빌드(없으면)+ 기동 → http://localhost:18080
+bash server-up.sh      # 이미지 빌드(없으면)+ 기동 → http://localhost:8080
 bash server-down.sh    # 정지/제거 (notes 는 ./agent-notes 에 유지)
 ```
 - 기본 **live**(실제 추론). 오프라인 echo 데모는 `AGENT_MODE=mock bash server-up.sh`.

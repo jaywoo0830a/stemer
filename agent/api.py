@@ -1,8 +1,8 @@
 """agent/api — 웹 API (FastAPI). 동기 POST /run-plans 로 계획서 → 병렬 에이전트 → 결과.
 
 실행 (실제 llama/Ollama 서버 — live 기본):
-    uvicorn agent.api:app --host 0.0.0.0 --port 18080   # agent API 포트 = 18080
-    # (myllm Script Runner 가 8000 을 쓰므로 agent 는 18080 으로 전용)
+    uvicorn agent.api:app --host 0.0.0.0 --port 8080   # 우리 앱(agent API) 포트 = 8080
+    # (외부 LLM 서비스 myllm Script Runner 는 18080 을 쓰므로 agent 는 8080 으로 실행)
 
 오프라인 mock (서버 없이 파이프라인/API 테스트):
     python -c "

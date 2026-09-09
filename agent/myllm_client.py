@@ -16,7 +16,7 @@ DOC/1(myLLM Script Runner API) 스펙 구현:
 
 사용:
     from agent.myllm_client import MyllmClient
-    c = MyllmClient(base_url="http://127.0.0.1:8000", token="...")
+    c = MyllmClient(base_url="http://127.0.0.1:18080", token="...")
     c.start_all()                      # parser+worker+coder+reasoner (항시 셋)
     c.start_heavy("setter")            # 14B 단독 on-demand (상호배타)
     rep = c.status()                   # {"ok":..,"stdout":..,...}
@@ -33,7 +33,7 @@ class MyllmError(Exception):
     """myllm API 호출 실패/비허용 응답."""
 
 
-DEFAULT_MYLLM_URL = "http://127.0.0.1:18080"  # 상호배타: agent API 는 8000(기본)이 아님
+DEFAULT_MYLLM_URL = "http://127.0.0.1:18080"  # 외부 LLM 서비스(myllm Script Runner)
 
 # DOC/1 에 정의된 액션
 ACTIONS = frozenset({"up", "down", "start_all", "start_heavy", "status",

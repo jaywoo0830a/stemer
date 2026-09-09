@@ -1,18 +1,20 @@
 # ---------------------------------------------------------------------------
 # WEB API (agent/api.py) — 외부에서 계획서 제출하는 진입점
-#   uvicorn agent.api:app --host 0.0.0.0 --port 18080
+#   uvicorn agent.api:app --host 0.0.0.0 --port 8080
 #   POST /run-plans   {"plan":"[Task 1: explain] ...","use_parser":true}
 #   POST /split-plans {"plan":"..."}
 #   GET  /health
 # role→서버주소(parser 8081/worker 8082/coder 8086/reasoner 8088,
 #                 embed=Ollama 11434) 는 agent/registry.py 기본값 및
 #                 agent/config/agent.yaml(.example) 참조.
-# myllm(모델 기동, DOC/1 Script Runner) 은 MYLLM_API/MYLLM_TOKEN 로 설정.
+# myllm(모델 기동, 외부 LLM 서비스 DOC/1 Script Runner) 은 MYLLM_API/MYLLM_TOKEN 로 설정.
+#   기본 MYLLM_API = http://127.0.0.1:18080
 # ---------------------------------------------------------------------------
 agent_gateway:
-  url: http://localhost:18080
+  url: http://localhost:8080
   default_mode: live        # live=실제 llama/Ollama, mock=오프라인(테스트)
   boot_on_run: true         # /run-plans 시 myllm 으로 항시 모델(+필요시 14B) 부팅
+  myllm_api: http://127.0.0.1:18080
 
 # ---------------------------------------------------------------------------
 # (보존) 구 brain/ 마이크로서비스 스텁 계약 — agent 로 대체 예정, 제거 금지

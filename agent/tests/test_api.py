@@ -66,7 +66,7 @@ def test_run_plans_error_surface_for_bad_payload(client):
 # myllm(모델 기동) 연동
 # --------------------------------------------------------------------------- #
 def _myllm_client():
-    return MyllmClient(base_url="http://127.0.0.1:8000", token="secret",
+    return MyllmClient(base_url="http://127.0.0.1:18080", token="secret",
                        transport=FakeMyllmTransport())
 
 
@@ -76,7 +76,7 @@ def test_health_exposes_myllm_config(tmp_path):
     h = TestClient(app).get("/health").json()
     assert h["myllm"] == {
         "configured": True,
-        "base_url": "http://127.0.0.1:8000",
+        "base_url": "http://127.0.0.1:18080",
         "token_set": True,
         "boot_on_run": True,
     }

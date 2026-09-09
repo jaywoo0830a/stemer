@@ -4,7 +4,7 @@
 가는 흐름과, "틀 이탈" 을 막는 검증(판사) 단계를 간결히 정리.
 
 ```bash
-curl -X POST localhost:18080/run-plans -H 'Content-Type: application/json' \
+curl -X POST localhost:8080/run-plans -H 'Content-Type: application/json' \
   -d '{"plan":"[Task 1: explain] …", "rag":"book-store"}'
 ```
 
