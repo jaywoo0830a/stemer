@@ -13,7 +13,15 @@ services:
     volumes:
       - ./books:/books          # 입력 PDF 폴더 (호스트 study/books)
       - ./data:/data            # 영속: registry.json / store/ / notes/
-      - hf-cache:/root/.cache/huggingface   # HF 모델 캐시 영속(재다운로드 방지)
+      - hf-cache:/root/.cache/huggingface   # HF 모델 캐시 영속(bge-m3 등 재다운로드 방지)
+      # docling 모델 캐시 영속 — HF캐시와 별개 경로라 필수!
+      #   docling(cache_dir/models)은 ~/.cache/huggingface 가 아닌 자체 캐시
+      #   /root/.cache/docling 에 저장하므로, 볼륨 없으면 accumulate/ingest 마다
+      #   레이아웃·테이블·수식(VLM) 모델을 또 다시 내려받는다(수~수십 GB).
+      #   문서화되기 이전 구버전(doclng)과 신버전(docling) 모두 커버하려고
+      #   같은 볼륨을 양쪽 경로에 마운트한다.
+      - docling-cache:/root/.cache/docling
+      - docling-cache:/root/.cache/doclng
     # /dev/shm 확대: docling 스레드 파이프라인/DataLoader 공유메모리 (기본 64MB 는 부족)
     shm_size: '2gb'
     ulimits:
@@ -36,6 +44,8 @@ services:
       DOCLING_FORMULAS: ${DOCLING_FORMULAS:-0}
       DOCLING_FORMULA_PRESET: ${DOCLING_FORMULA_PRESET:-codeformulav2}
       DOCLING_FORMULA_FP32: ${DOCLING_FORMULA_FP32:-1}
+      # docling 모델 캐시 위치 — 위 docling-cache 볼륨과 일치시켜 영속화
+      DOCLING_CACHE_DIR: ${DOCLING_CACHE_DIR:-/root/.cache/docling}
       # docling 처리 시 표 구조 추출 (FORMULAS 온전성 검사 때는 0 도 가능)
       DOCLING_TABLES: ${DOCLING_TABLES:-1}
       # 로컬 LLM(Ollama) KaTeX 후처리 — 게이트: POSTKATEX=1 로 켠다
@@ -51,3 +61,4 @@ services:
 
 volumes:
   hf-cache:
+  docling-cache:
