@@ -259,6 +259,9 @@ class Orchestrator:
                           judge_role=verdict.judge_role, codes=last_codes)
         except GatewayError as exc:
             return WorkerResult(task=task.id, role=role, url=srv.url, error=str(exc))
+        except Exception as exc:  # noqa: BLE001 — 판사/네트워크 등 예상외 예외도 작업 실패로 (500 차단)
+            return WorkerResult(task=task.id, role=role, url=srv.url,
+                                error=f"{type(exc).__name__}: {exc}")
         raise RuntimeError("unreachable")  # noqa: B904  (guard)
 
     def _run_problems_exec(self, out: str, qtext: str, chunks,

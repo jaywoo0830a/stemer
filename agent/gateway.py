@@ -69,8 +69,13 @@ class _HttpxTransport:
     def post_json(self, url: str, body: dict, timeout: float,
                   headers: Optional[dict] = None) -> dict:
         import httpx  # 선택 의존성
-        with httpx.Client(timeout=timeout, headers=headers) as c:
-            r = c.post(url, json=body)
+        try:
+            with httpx.Client(timeout=timeout, headers=headers) as c:
+                r = c.post(url, json=body)
+        except GatewayError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — 네트워크/타임아웃/연결 실패 → GatewayError
+            raise GatewayError(f"request to {url} failed: {type(exc).__name__}: {exc}") from exc
         if r.status_code >= 400:
             raise GatewayError(f"HTTP {r.status_code} on {url}: {r.text[:200]}")
         return r.json()
