@@ -4,14 +4,12 @@
 # 추가: 컨테이너만 정지·제거(bind 볼륨/notes 는 보존). 이미지 제거는
 #   docker image rm agent-gateway:latest
 set -euo pipefail
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "❌ docker 가 없습니다." >&2
-  exit 1
-fi
+require_cmd docker
 
-echo "▶ agent-gateway 컨테이너 정지/제거" >&2
+step "agent-gateway 컨테이너 정지/제거"
 docker compose -f docker-compose.agent.yml down
 
-echo "✅ done. (notes 는 ./agent-notes 에 남아 있음 — 이미지/데이터 유지)" >&2
+info "done. (notes 는 ./agent-notes 에 남아 있음 — 이미지/데이터 유지)"

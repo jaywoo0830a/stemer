@@ -4,8 +4,13 @@
 #   EMBED=1 bash docker/build.sh                  # 서버 실사용
 #   EMBED=1 DOCLING=1 bash docker/build.sh        # + docling 풀 파싱 (복잡 레이아웃/스캔)
 set -euo pipefail
-cd "$(dirname "$0")/.."
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+cd_study
 EMBED="${EMBED:-0}"
 DOCLING="${DOCLING:-0}"
+
+step "study 이미지 빌드 (EMBED=$EMBED DOCLING=$DOCLING)"
 docker compose build --build-arg "EMBED=$EMBED" --build-arg "DOCLING=$DOCLING"
-echo "built study:latest (EMBED=$EMBED DOCLING=$DOCLING)"
+
+info "built study:latest (EMBED=$EMBED DOCLING=$DOCLING)"

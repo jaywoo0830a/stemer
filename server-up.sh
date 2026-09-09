@@ -10,27 +10,23 @@
 #   AGENT_PARSER/WORKERS/CODERS/REASONER/EMBED   # 역할 주소 재정의
 #   -f 재빌드:  docker build -f docker/agent-gateway.Dockerfile -t agent-gateway:latest .
 set -euo pipefail
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "❌ docker 가 없습니다. Docker 데몬이 있는 서버(예: 192.99.201.121)에서 실행하세요." >&2
-  echo "   (로컬 오프라인은 서버 대신 mock: python -m uvicorn agent.api:app ...)" >&2
-  exit 1
-fi
+docker_available
+cd_root
 
-if ! docker info >/dev/null 2>&1; then
-  echo "❌ docker 데몬에 연결할 수 없습니다 (데몬 시작 여부 확인)." >&2
-  exit 1
-fi
+IMAGE="agent-gateway:latest"
+COMPOSE_FILE="docker-compose.agent.yml"
 
 # 이미지 없으면 빌드
-if ! docker image inspect agent-gateway:latest >/dev/null 2>&1; then
-  echo "▶ image agent-gateway:latest 없음 → 빌드합니다" >&2
-  docker build -f docker/agent-gateway.Dockerfile -t agent-gateway:latest .
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  step "image $IMAGE 없음 → 빌드합니다"
+  docker build -f docker/agent-gateway.Dockerfile -t "$IMAGE" .
 fi
 
-echo "▶ agent-gateway 컨테이너 기동 (mode=${AGENT_MODE:-live})" >&2
-docker compose -f docker-compose.agent.yml up -d
+step "agent-gateway 컨테이너 기동 (mode=${AGENT_MODE:-live})"
+docker compose -f "$COMPOSE_FILE" up -d
 
-echo "✅ http://localhost:8000 (POST /run-plans) · 중지하려면: bash server-down.sh" >&2
-docker compose -f docker-compose.agent.yml ps
+info "http://localhost:8000 (POST /run-plans) · 중지하려면: bash server-down.sh"
+docker compose -f "$COMPOSE_FILE" ps

@@ -10,7 +10,10 @@
 # 실행:
 #   bash study/pilot/run-pilot.sh
 set -euo pipefail
-cd "$(dirname "$0")/.."   # study/
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker/lib.sh"
+
+cd_study
+require_cmd python3
 
 REG="${STUDY_REGISTRY:-pilot/registry.json}"
 STORE="${STUDY_STORE:-pilot/store}"
@@ -27,22 +30,23 @@ if ! cli books list --registry "$REG" | grep -q "^$BOOK "; then
       --source "$SRC" --registry "$REG"
 fi
 for t in "Limit of a function:3.1" "Limit of a sequence:3.5" "Monotone convergence:3.6"; do
-  title="${t%%:*}"; section="${t##*:}"
+  title="${t%%:*}"
+  section="${t##*:}"
   id=$(echo "$title" | tr 'A-Z ' 'a-z-')
   if ! cli topics list --registry "$REG" | grep -q " $id "; then
     cli topics add --book "$BOOK" --title "$title" --section "$section" --registry "$REG"
   fi
 done
 
-echo "== status (before) =="
+step "status (before)"
 cli status --registry "$REG"
 
-echo "== index =="
+step "index"
 cli index "$SRC" --book "$BOOK" --profile text --embedder "$EMBEDDER" \
     --registry "$REG" --store "$STORE"
 
-echo "== generate =="
+step "generate"
 cli generate --book "$BOOK" --registry "$REG" --store "$STORE" --notes "$NOTES"
 
-echo "== notes =="
-ls -1 "$NOTES" 2>/dev/null || echo "(no notes yet)"
+step "notes"
+ls -1 "$NOTES" 2>/dev/null || info "(no notes yet)"

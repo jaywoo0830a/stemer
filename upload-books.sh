@@ -8,56 +8,50 @@
 #
 # 참고: ./upload-books.env 에 SB_HOST/SB_KEY 를 적어두면 프롬프트를 건너뜁니다.
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib.sh"
 
 # ---- env 파일(선택) 로드 ----
-if [[ -f ./upload-books.env ]]; then
-  set -a; # shellcheck disable=SC1091
-  source ./upload-books.env
-  set +a
-fi
+load_env_optional "$SCRIPT_DIR/upload-books.env"
 
-SERVER="${1:-$SB_HOST}"
+SERVER="${1:-${SB_HOST:-}}"
 KEY="${SB_KEY:-}"
 LOCAL="${2:-}"
 REMOTE="${3:-}"
 
 # ---- 누락 항목 프롬프트 ----
-ask() { local -n _v="$1"; local msg="$2"; if [[ -z "$_v" ]]; then read -r -p "$msg: " _v; fi; }
-ask SERVER "서버 (user@host)            "
-[[ -z "$LOCAL" ]] && read -r -p "Windows/로컬 폴더 경로     " LOCAL
-[[ -z "$REMOTE" ]] && read -r -p "서버 업로드 폴더(예 ~/study/books/math): " REMOTE
+ask SERVER "서버 (user@host)"
+ask LOCAL "Windows/로컬 폴더 경로"
+ask REMOTE "서버 업로드 폴더(예 ~/study/books/math)"
 
 # 붙여넣을 때 섞여 들어온 따옴표 제거
-stripq() { local v="$1"; v="${v#\"}"; v="${v#\'}"; v="${v%\"}"; v="${v%\'}"; printf '%s' "$v"; }
 SERVER="$(stripq "$SERVER")"
 LOCAL="$(stripq "$LOCAL")"
 REMOTE="$(stripq "$REMOTE")"
 
-[[ -z "$SERVER" || -z "$LOCAL" || -z "$REMOTE" ]] && { echo "모든 입력이 필요합니다." >&2; exit 2; }
+[[ -n "$SERVER" && -n "$LOCAL" && -n "$REMOTE" ]] \
+  || die "모든 입력이 필요합니다."
 
 # ---- Windows 경로 → WSL 경로 변환 ----
 if [[ "$LOCAL" =~ ^[A-Za-z]:[/\\] || "$LOCAL" =~ ^\\\\ ]]; then
-  if command -v wslpath >/dev/null 2>&1; then
-    LOCAL="$(wslpath -u "$LOCAL")"
-  else
-    echo "error: Windows 경로인데 wslpath 가 없습니다." >&2; exit 1
-  fi
+  require_cmd wslpath
+  LOCAL="$(wslpath -u "$LOCAL")"
 fi
-[[ -d "$LOCAL" ]] || { echo "error: 폴더가 없습니다: $LOCAL" >&2; exit 1; }
+[[ -d "$LOCAL" ]] || die "폴더가 없습니다: $LOCAL"
 
 # ---- 업로드할 파일 수집 ----
 mapfile -t FILES < <(find "$LOCAL" -maxdepth 1 -type f \( -iname '*.pdf' -o -iname '*.djvu' \) | sort)
 if [[ ${#FILES[@]} -eq 0 ]]; then
-  echo "해당 폴더에 PDF/DJVU 가 없습니다: $LOCAL" >&2; exit 1
+  die "해당 폴더에 PDF/DJVU 가 없습니다: $LOCAL"
 fi
 
-echo "== 업로드 계획 =="
-echo "  파일 ${#FILES[@]}개 (PDF/DJVU): $LOCAL"
-echo "  → $SERVER:$REMOTE/"
+step "업로드 계획: 파일 ${#FILES[@]}개 (PDF/DJVU): $LOCAL"
+info "→ $SERVER:$REMOTE/"
 printf '   - %s\n' "${FILES[@]}"
 
 # ---- 서버 폴더 생성 후 SCP ----
+require_cmd ssh scp
 ssh ${KEY:+-i "$KEY"} "$SERVER" "mkdir -p $REMOTE"
 scp ${KEY:+-i "$KEY"} "${FILES[@]}" "$SERVER:$REMOTE/"
-echo "완료 ✅  서버에서 인덱싱: bash docker/run.sh ingest \"$REMOTE\" --subject math --profile fast --jobs 4"
+info "완료 ✅  서버에서 인덱싱: bash docker/run.sh ingest \"$REMOTE\" --subject math --profile fast --jobs 4"
 
