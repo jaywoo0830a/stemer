@@ -1,128 +1,143 @@
-# stemer — 서버 운영 가이드 & 프로젝트 개요
+# stemer — 매일 공부 루틴 가이드
 
-> 이 문서의 목적: **ROUTINE.md(매일 반복)를 서버에서 실제로 어떻게 실행하는지**와
-> **프로젝트의 각 모듈이 무엇인지**, 그리고 **전체 그림**을 한눈에 잡을 수 있게 정리한 것.
->
-> - 실제 하루치 작업순서 → [② 서버에서 해야 할 일](#2-서버에서-해야-할-일-운영-순서)
-> - 프로젝트가 뭐 하는 지 → [3 프로젝트 개요](#3-프로젝트-개요--stem-이란)
-> - 모듈별 설명 → [4 모듈 목록](#4-모듈-목록)
-> - 명령어 모음 → [5 자주 쓰는 명령어](#5-자주-쓰는-명령어)
+> **한 줄 목표:** 매일 **공부할 페이지 범위를 책에서 골라 → 그 페이지를 로컬 store(RAG)에 넣고
+> → 개념·예제·문제를 책 근거로 로컬 LLM에 물어보는 것.**
+
+## 1. 결론 — 당신이 매일 하는 일 (3단계)
+
+```
+① 공부할 페이지 범위를 정한다   → accumulate (store에 누적, 기존 유지·멱등)
+② 물어본다 (책 근거로)          → agent 질문 (POST /run-plans + rag:"store")
+③ 이어서 범위를 넓힌다          → 다음 날 또 ①
+```
+
+**질문 패턴 5가지 (셸 템플릿, 보고 싶은 것을 넣어 각각 실행):**
+
+```bash
+URL=http://127.0.0.1:18080
+q() { curl -s -X POST "$URL/run-plans" -H 'Content-Type: application/json' \
+       -d "{\"plan\":\"$1\",\"rag\":\"store\"}"; }
+
+# 1) concept explanation
+q "[Task 1: explain]  Explain what a vector field is, definition and intuition"
+# 2) solve an example from the book
+q "[Task 1: explain]  Work through the example (Worked Problem) on pages 1159-1165 the way the book does"
+# 3) a slightly-varied example
+q "[Task 1: problems]  Make one similar example by changing only the numbers/conditions of the example in the source, then solve it the book's way"
+# 4) concept check problem
+q "[Task 1: problems]  From the source, make a problem that checks this concept"
+# 5) a slightly-varied exercise
+q "[Task 1: problems]  Make one variant exercise by changing only the numbers of an exercise in the source, then solve it"
+```
+
+> 모두 **책 store를 근거**로 논리적으로 답하고(`rag:"store"`), 각 답에 출처(페이지)가 붙습니다.
+> `explain`=설명, `problems`=문제 만들기+풀이. `rag`를 빼면 책 근거를 안 쓰므로 **반드시 유지**.
+
+## 2. 전체 그림 (배경 이해용)
+
+```
+  ╔══════════ WSL/로컬 ══════════╗
+  ║  책 PDF ─ upload-books.sh ─▶ 서버 books/  ║
+  ╚═══════════════════════════════╝
+                ▼
+  ╔════════════════════ 서버 ════════════════════╗
+  ║  [A] study: books/ → accumulate(범위 누적) → store(RAG 청크)  ║
+  ║  [B] myllm : 로컬 LLM 서버들 띄움 (모델)                    ║
+  ║  [C] agent : 18080 ← store 근거로 질문에 답 (로컬 LLM 호출)   ║
+  ╚══════════════════════════════════════════════╝
+```
+
+- **누적 = 멱등**: 이미 넣은 범위는 자동 skip → 매일 조금씩 앞으로 나아가면 store가 커짐.
+- "토픽"은 선택 관리용 태그일 뿐, **질문할 때는 꼭 필요하지 않다.** (아래 참고)
 
 ---
 
-## 1. 전체 그림 (10초 요약)
+## 3. 서버에서 하는 일 (단계별)
 
-```
-  ╔════════════════════ WSL / 로컬(Windows) ════════════════════════╗
-  ║  ① 교재 PDF/DJVU  ── upload-books.sh(SCP) ──▶  서버 books/ 폴더    ║
-  ╚══════════════════════════════│═══════════════════════════════════╝
-                               ▼
-  ╔════════════════════ 서버(192.99.201.121) — Linux ══════════════╗
-  ║  [A] study RAG 공장 (docker)                                    ║
-  ║      books/ → accumulate(페이지 누적) → store/ (임베딩된 청크)     ║
-  ║      topics add → generate / problembank → notes/*.md           ║
-  ║                                                                  ║
-  ║  [B] myllm : 로컬 LLM 서버들(8081~8090, Ollama 11434) 띄움       ║
-  ║                                                                  ║
-  ║  [C] agent API (docker, host network)                           ║
-  ║      http://localhost:18080 ← RAG store 근거로 추론/질문           ║
-  ╚══════════════════════════════│═══════════════════════════════════╝
-```
-
-**핵심 흐름**: 매일 "공부할 페이지 범위"만 골라 store에 누적 → 그 섹션으로
-문제/강의를 만들거나 물어본다. (누적은 멱등이라 안 지워짐.)
-
-```
-페이지 범위 선택 → accumulate(누적 인제스트) → topic add → generate / problembank → 질문(agent)
-```
-
----
-
-## 2. 서버에서 해야 할 일 (운영 순서)
-
-### 0) 최초 1회 — 환경 세팅 (로컬이 서버 운영을 도와줌)
+### 0) 최초 1회 — 책 등록 & 서버 기동
 
 | 스크립트 | 역할 | 실행 위치 |
 |---|---|---|
-| `upload-books.sh` | 교재 PDF/DJVU를 SCP로 서버 업로드 | 로컬(WSL) |
-| `server-up.sh` | agent API 도커 컨테이너 기동/빌드 | 서버 |
+| `upload-books.sh` | 교재 PDF를 서버로 업로드 | 로컬(WSL) |
+| `server-up.sh` | agent API 도커 기동/빌드 | 서버 |
 | `server-down.sh` | agent API 내리기(데이터 보존) | 서버 |
 
 - 업로드: `./upload-books.sh "user@서버IP" 'C:\Users\...\수학' ~/study/books/math`
-- 단축 설정: `./upload-books.env`에 `SB_HOST`/`SB_KEY`(키 경로)를 적으면 프롬프트 생략.
-- 업로드 후 서버에서 인제스트: `bash docker/run.sh ingest <폴더> --subject math --profile fast --jobs 4`
-- 임베딩(bge-m3)은 `HF_ENDPOINT=https://hf-mirror.com`(미러) 사용. 수식 LaTeX은
-  `DOCLING_FORMULAS=1 DOCLING_FORMULA_FP32=1` 도 함께.
+- 책 1번 등록(그 후 매일 ①로 페이지만 추가):
+  ```bash
+  bash docker/run.sh books add --id calc --title "Calculus" --subject math \
+      --source /books/math/calc.pdf
+  ```
+- 서버 기동(agent 질문용): `bash server-up.sh` → `http://localhost:18080`
+- 임베딩(bge-m3)은 `HF_ENDPOINT=https://hf-mirror.com`(미러), 수식은
+  `DOCLING_FORMULAS=1 DOCLING_FORMULA_FP32=1`.
 
-> ⚠️ 작업의 실제 실행 위치는 전부 **서버의 `~/projects/stemer/study`** 에서.
-> 로컬은 `.venv`로 테스트만.
+> 실행 위치는 전부 **서버의 `~/projects/stemer/study`**. 로컬은 `.venv` 테스트만.
 
----
+### ① 매일 — "오늘 공부할 범위만 store에 넣기" (accumulate)
 
-### ① 매일 반복 — "오늘 범위만 누적 인제스트" (가장 중요)
-
-교재를 펼쳐 오늘 페이지 범위(`A-B`)를 정한다 → 한 줄로 store에 추가(기존 유지·누적).
-같은 구간 재실행은 자동 skip(멱등).
+교재를 펼쳐 오늘 페이지 범위를 정한다 → 한 줄 실행(기존 유지·누적, 멱등):
 
 ```bash
 cd ~/projects/stemer/study
+
+# 16-1 Vector Fields
 DOCLING_FORMULAS=1 DOCLING_FORMULA_FP32=1 HF_ENDPOINT=https://hf-mirror.com \
-  bash docker/run.sh accumulate --book 미적분 --pages 759-772 --source /books/math/미적분.pdf
-# 성공: "ingested 미적분: +N chunks" / "now covered intervals: [...] [759,772]"
-# 중복: "skip ... already covered"   → 다음 날은 다음 범위로 한 줄 더
+  bash docker/run.sh accumulate --book calc --pages 1159-1165 --source /books/math/calc.pdf
+
+# 16-2 Line Integrals
+DOCLING_FORMULAS=1 DOCLING_FORMULA_FP32=1 HF_ENDPOINT=https://hf-mirror.com \
+  bash docker/run.sh accumulate --book calc --pages 1166-1178 --source /books/math/calc.pdf
 ```
 
-- `--pages A-B`는 PDF 1-based 실제 쪽. 인쇄폭과 offset 있으면 보정.
-- "하루 한 조각씩 앞으로 나아가면 store가 크게 커진다."
-- 이 명령은 **무조건 누적** — 이전 날 넣은 범위는 그대로 남는다(안전).
+- 성공: `ingested calc: +N chunks` / `now covered intervals: [...]`.
+- 중복: `skip ... already covered` → 다음 범위로 한 줄 더. **이미 넣은 건 다시 안 넣는다.**
+- 이렇게 쌓인 게 **RAG store** = 질문의 근거가 된다. (지금 calc는 1159-1165 ✅, 1166-1178 진행 중)
 
-### ② 그 섹션으로 토픽 등록
+### ② 매일 — 책 근거로 물어보기 (agent 질문)
+
+방금 넣은 범위를 근거로 개념·예제·문제를 묻는다. **여기가 핵심**:
 
 ```bash
-bash docker/run.sh topics add --book 미적분 --title "11-1 <섹션명>" --section 11.1 --kind exam
-# 반복 가능 / Kind: exam | note | problems
-bash docker/run.sh topics list --book 미적분     # 등록 확인 → topic id = "미적분-11-1" 형태
+URL=http://127.0.0.1:18080
+q() { curl -s -X POST "$URL/run-plans" -H 'Content-Type: application/json' \
+       -d "{\"plan\":\"$1\",\"rag\":\"store\"}"; }
+
+q "[Task 1: explain]  Explain what a vector field is: definition and intuition"
+q "[Task 1: explain]  Work through the example in the source the way the book does"
+q "[Task 1: problems]  Make a similar example by changing only the numbers, then solve it"
+q "[Task 1: explain]  From the source, make and answer one question that checks this concept"
+q "[Task 1: problems]  Make a variant exercise by changing only the numbers of an exercise, then solve it"
 ```
 
-- `--section`은 저장청크의 헤딩 번호(예 `11.1`)와 맞춰야 검색이 정확하다.
+- agent가 커져 있어야 함(처음에 `server-up.sh`). 미리 켜져 있으면 그냥 실행.
+- **`rag:"store"` 필수** (책 근거). 답에 출처 페이지가 붙으면 정상 recall.
+- `explain`=설명 · `problems`=문제 만들기+풀이. 여러 Task를 한 번에 넣어도 됨(병렬):
+  ```bash
+  q "[Task 1: explain] concept explanation  [Task 2: problems] variant example"
+  ```
 
-### ③ 생성물 생성 (개념/강의노트 or 연습문제)
+### (선택) 토픽·노트 파일로 관리하고 싶다면
 
+질문만으로 충분하지만, **섹션 단위로 정리된 노트/*.md 를 남기고 싶다면**:
 ```bash
-bash docker/run.sh generate      --topic 미적분-11-1     # 개념/강의 노트 (개별 1건)
-bash docker/run.sh problembank --topic 미적분-11-1     # 연습문제 세트 (개념노트 선행 권장)
+DOCLING_FORMULAS=1 DOCLING_FORMULA_FP32=1 HF_ENDPOINT=https://hf-mirror.com \
+  bash docker/run.sh topics discover --book calc   # store 섹션에서 토픽 자동 생성
+bash docker/run.sh generate      --topic calc-16.1  # 개념/강의 노트 (책 근거)
+bash docker/run.sh problembank --topic calc-16.1    # 연습문제 세트 (책 근거)
 ```
-
-- `--topic <id>`는 상태 무관으로 그 한 건만 실행.
-- 결과는 `study/data/notes/`에 저장 + KaTeX 린트 자동 적용.
-- `topics list --status todo` 대상은 `generate --book ...`으로 일괄도 가능.
-
-### ④ 질문할 때 (책 store를 근거로)
-
-agent API가 떠 있어야 함(`server-up.sh`). 방금 accumulate로 채운 청크를 근거로 recall:
-
-> 자동 모델 부팅(live 기본): `/run-plans` 진입 시 myllm Script Runner로 항시 모델
-> (parser/worker/coder/reasoner)을 `start_all` 하고, 문제 출제(problems) 가 있으면
-> 14B setter 를 `start_heavy` 로 켠다 (DOC/1·DOC/2). 끄려면 `AGENT_BOOT_MODELS=0`.
-
-```bash
-curl -s -X POST http://127.0.0.1:18080/run-plans -H 'Content-Type: application/json' \
-  -d '{"plan":"[Task 1: explain] <여기에 질문>","rag":"store"}'
-```
-
-- **`"rag":"store"` 필수** (없으면 store를 안 씀 → 근거 없는 답).
-- 응답 `sources` / `Source anchor`에 방금 넣은 페이지가 보이면 정상 recall.
+- `--kind`는 그 토픽의 산출물 형태: `exam`(종합) · `note`(개념만) · `problems`(연습문제).
+  질문을 바로 하는 게 목적이면 **굳이 안 만들어도 된다.**
 
 ### 매일 체크 한 줄
 
-> 새 페이지 범위 → `accumulate` → 새 `section` 토픽 → `generate`/`problembank` → 질문.
+> 새 페이지 범위 → `accumulate` →  (필요시 토픽) → 책 근거로 질문(개념·예제·변형·문제·변형문제).
 
-> ⚠️ **이미 넣은 범위는 다시 하지 않는다** — accumulate는 덮인 범위를 자동 skip이라,
-> 하루 한 조각씩 앞으로만 나아가면 store가 크게 커진다.
+> ⚠️ 이미 넣은 범위는 다시 안 한다. 하루 한 조각씩 앞으로만 → store가 커진다.
 
 ---
 
-## 3. 프로젝트 개요 — "stem"(STEM 교재 학습 + 멀티에이전트)
+## 4. 프로젝트 개요 — "stem"(STEM 교재 학습 + 멀티에이전트)
 
 이 저장소는 **"공부할 교재 덩어리를 RAG 저장소로 만들고, 로컬에서 여러 AI 역할이
 문제/설명/증명/코드를 병렬 생성·스스로 판정"**하는 시스템이다.
@@ -141,7 +156,7 @@ curl -s -X POST http://127.0.0.1:18080/run-plans -H 'Content-Type: application/j
 
 ---
 
-## 4. 모듈 목록
+## 5. 모듈 목록
 
 ### 4.1 `study/` — 교재 RAG 공장 (`study_lib`)
 
@@ -212,7 +227,7 @@ curl -s -X POST http://127.0.0.1:18080/run-plans -H 'Content-Type: application/j
 
 ---
 
-## 5. 자주 쓰는 명령어
+## 6. 자주 쓰는 명령어
 
 ### study(서버, `~/projects/stemer/study`)
 ```bash
@@ -250,7 +265,7 @@ python -m agent.cli run plan.md --live --rag store --notes notes  # 실제 서�
 
 ---
 
-## 6. 주의사항 & 팁
+## 7. 주의사항 & 팁
 
 - **누적 = 멱등**: `accumulate`는 이미 커버한 page interval을 건너뛰지만, 부분 중복은
   새 페이지만 추가. "안 지워지고 누적"이 기본 설계.
