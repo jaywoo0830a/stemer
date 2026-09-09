@@ -46,10 +46,10 @@ class RegistryError(Exception):
 
 DEFAULT_ROLES: Dict[str, list[str]] = {
     "parser": ["http://127.0.0.1:8081"],
-    "worker": [f"http://127.0.0.1:{p}" for p in range(8082, 8086)],  # 8082-8085
-    # 코더 4: 8086-8087 + 8089-8090 (8088 은 reasoner) — 서버 표준 배치
-    "coder": ["http://127.0.0.1:8086", "http://127.0.0.1:8087",
-              "http://127.0.0.1:8089", "http://127.0.0.1:8090"],
+    # DOC/2 배치: 디코딩은 메모리 대역폭 결합 → GGUF당 1 프로세스(+ --parallel N)
+    # 이므로 worker/coder 는 단일 서버 하나만 둔다. (다중 URL은 구 배치/비상 시 라운드로빈)
+    "worker": ["http://127.0.0.1:8082"],
+    "coder": ["http://127.0.0.1:8086"],
     "reasoner": ["http://127.0.0.1:8088"],
     # (선택) 전용 문제생성기(SETTER) 와 판사(JUDGE) — env/agent.yaml 가 있으면 활성
     "setter": ["http://127.0.0.1:8091"],

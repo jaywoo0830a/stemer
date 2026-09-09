@@ -10,13 +10,11 @@ def test_default_roles_exist():
     # setter/judge 는 env/설정으로 붙이는 '선택' 역할이라 기본엔 없다
     assert set(reg.roles()) == {"parser", "worker", "coder", "reasoner", "embed"}
     assert reg.role("parser").base_url == "http://127.0.0.1:8081"
-    # worker/coder 는 다중 pool
-    assert len(reg.role("worker").urls) == 4
-    assert reg.role("worker").urls[0] == "http://127.0.0.1:8082"
-    assert len(reg.role("coder").urls) == 4
-    assert reg.role("coder").urls[0] == "http://127.0.0.1:8086"
-    assert "http://127.0.0.1:8089" in reg.role("coder").urls
-    assert "http://127.0.0.1:8090" in reg.role("coder").urls
+    # DOC/2 배치: worker/coder 는 단일 서버 (GGUF당 1프로세스 + --parallel)
+    assert len(reg.role("worker").urls) == 1
+    assert reg.role("worker").base_url == "http://127.0.0.1:8082"
+    assert len(reg.role("coder").urls) == 1
+    assert reg.role("coder").base_url == "http://127.0.0.1:8086"
     assert reg.role("embed").kind == "embed"
 
 
@@ -49,13 +47,19 @@ def test_env_override(monkeypatch):
 
 
 def test_server_pool_rotates_worker():
-    reg = Registry()
-    # worker pool: 라운드로분배
-    pool = ServerPool(reg)
-    got = [pool.next("worker").role_index for _ in range(4)]
+    # 기본 배치(DOC/2 단일 서버)에선 라운드로빈 없이 항상 그 서버
+    pool = ServerPool(Registry())
+    s = pool.next("worker")
+    assert s.role_index == 0 and s.url == "http://127.0.0.1:8082"
+    # 구 배치(다중 URL)를 명시하면 라운드로빈이 동작한다
+    multi = Registry().with_overrides(
+        workers=["http://127.0.0.1:8082", "http://127.0.0.1:8083",
+                 "http://127.0.0.1:8084", "http://127.0.0.1:8085"])
+    pool2 = ServerPool(multi)
+    got = [pool2.next("worker").role_index for _ in range(4)]
     assert got == [0, 1, 2, 3]
-    # 5번째는 처음으로 순환 (server 만 4대니 url 도 반복)
-    assert pool.next("worker").role_index == 0
+    # 5번째는 처음으로 순환
+    assert pool2.next("worker").role_index == 0
 
 
 def test_pool_single_urls_not_rotated():
@@ -66,9 +70,9 @@ def test_pool_single_urls_not_rotated():
 
 def test_default_ports_match_myllm():
     """실서버 myllm config 와 일치해야 한다 — 회귀 가드.
-    (코더 4 = 8086,8087,8089,8090; 8088 은 reasoner; setter/judge 는 옵션)"""
+    (DOC/2 배치: worker=8082, coder=8086 단일 서버; 8088 은 reasoner; setter/judge 는 옵션)"""
     reg = Registry()
     assert reg.role("parser").urls[0].endswith("8081")
-    assert [u.rpartition(":")[2] for u in reg.role("worker").urls] == ["8082","8083","8084","8085"]
-    assert [u.rpartition(":")[2] for u in reg.role("coder").urls] == ["8086","8087","8089","8090"]
+    assert [u.rpartition(":")[2] for u in reg.role("worker").urls] == ["8082"]
+    assert [u.rpartition(":")[2] for u in reg.role("coder").urls] == ["8086"]
     assert reg.role("reasoner").urls[0].endswith("8088")
