@@ -32,6 +32,7 @@ from .profiles import load_profile, profile_names
 from .protocol import load_schema
 from .registry import DRAFT, INDEXED, JsonFileStore, Library
 from .store import IndexStore, JsonDurableSink
+from .compress import compress_chapter
 from .subjects import SUBJECTS
 from .postproc_katex import default_ollama_client, guard_ok, postkatex_if_enabled
 from .problembank import (
@@ -370,6 +371,52 @@ def _problembank_cmd(ws: Workspace, args) -> int:
     return 0
 
 
+# ---- compress (공부 범위 → 한 편 공부 교재, LLM 이 통째로 압축) ----
+def _compress(ws: Workspace, args) -> int:
+    """store 에 누적된 책(공부 범위) 청크를 취합해 OpenRouter LLM 으로 한 편의
+    공부 교재 md 로 압축해 notes/ 에 저장한다.
+
+    - 공부 범위를 고르는 일은 accumulate/chapter focus (Docling index) 가 이미 했다.
+      여기서는 그 범위의 chunk 텍스트를 store 에서 그대로 긁어 LLM 한 번에 보낸다.
+    - LLM: OpenRouterClient(OPENROUTER_API_KEY) — 필요시 --model/--backend 로 교체.
+    """
+    from .openrouter import OpenRouterClient
+
+    lib = ws.library()
+    book = lib.book(args.book)
+
+    store = ws.open_store()
+    n_loaded = store.load_all()
+    chunks = store.chunks(book_id=args.book)
+    passages = [c.text for c in chunks]
+    if not passages:
+        print(f"[compress] store has no chunks for book '{args.book}' "
+              f"(loaded={n_loaded}; run accumulate/chapter first)",
+              file=sys.stderr)
+        return 1
+    # 순서: 책 내 seq 순 (이미 chunks()가 보장). 섹션별 배칭 라벨로 첫 섹션만
+    section_label = chunks[0].section or ""
+
+    in_budget = getattr(args, "in_budget", None) or _compress_input_budget()
+    llm = OpenRouterClient(model=args.model) if getattr(args, "model", None) else OpenRouterClient()
+    scope = args.scope or getattr(args, "range_", "") or str(book.page_range or "").strip()
+    print(f"[compress] book={args.book} chunks={len(passages)} "
+          f"scope={scope or '-'} model={llm._model} in≤{in_budget}t", flush=True)
+    out = compress_chapter(
+        passages, llm, title=args.title or book.title or args.book,
+        book=args.book, scope=scope, notes_dir=ws.notes,
+        in_budget=in_budget, section_label=section_label)
+    print(f"wrote {out}")
+    return 0
+
+
+def _compress_input_budget() -> int:
+    try:
+        return int(os.environ.get("STUDY_COMPRESS_INPUT_TOKENS", "120000"))
+    except ValueError:
+        return 120000
+
+
 # ---- chapter focus (챕터 단위 소규모 재인제스트) ----
 # 챕터는 사용자가 직접 페이지 범위(--range)로 지정한다.
 # EXAMPLES:  python -m study_lib.cli chapter focus --book calc --range 42-90
@@ -691,6 +738,19 @@ def build_parser() -> argparse.ArgumentParser:
     pb.add_argument("--retry", type=int, default=3,
                     help="10/5/5 검증 실패 시 재시도 횟수")
     pb.set_defaults(func=_problembank_cmd)
+
+    cm = subp("compress")
+    cm.add_argument("--book", required=True,
+                    help="공부 범위가 store에 누적된 책 id")
+    cm.add_argument("--scope",
+                    help="범위 라벨(예: '1159-1165') — 기본: 책 page_range")
+    cm.add_argument("--title", help="출력 제목 (기본: 책 title)")
+    cm.add_argument("--model",
+                    help="OpenRouter 모델 id (기본: OPENROUTER_MODEL -> google/gemini-2.5-flash)")
+    cm.add_argument("--in-budget", dest="in_budget", type=int,
+                    help="입력 토큰 예산 (기본 120000; 넘으면 자동 배칭)")
+    cm.set_defaults(func=_compress)
+
 
     # ---- chapter focus: 챕터는 사용자가 페이지 범위로 직접 지정 ----
     chap = subp("chapter")

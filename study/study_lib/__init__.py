@@ -1,10 +1,13 @@
-"""study_lib — 교재 RAG 공장 공개 라이브러리.
+    """study_lib — 교재 RAG 공장 공개 라이브러리.
 
 계약 우선 TDD: `tests/test_*_contract.py`가 이 패키지의 공개 동작을
 클라이언트 관점에서 먼저 고정한다.
 """
-from . import chunk, discover, embed, factory, figures, ingest, lint, llm, parse, profiles, protocol, registry, render, retrieve, store, subjects, tokens
+from . import chunk, compress, discover, embed, factory, figures, ingest, lint, llm, openrouter, parse, profiles, protocol, registry, render, retrieve, store, subjects, tokens
 from .chunk import Chunk, ChunkProfile, chunk_markdown
+from .compress import (assemble_passages, build_front_matter, compress_body,
+                       compress_chapter, estimate_tokens, split_into_batches,
+                       strip_fences)
 from .discover import DiscoverReport, discover_topics, topic_title
 from .embed import StubEmbedder, TransformerEmbedder, embed_text
 from .factory import GenerateResult, generate_one, build_system, build_user
@@ -20,11 +23,15 @@ from .retrieve import (CrossEncoderReranker, Reranker, RetrievedChunk,
                        RetrievedContext, rerank_top, retrieve)
 from .store import (IndexStore, IndexedChunk, JsonDurableSink, PgDurableSink,
                     pg_create_sql, pg_delete_book_sql, pg_read_sql, pg_upsert_sql)
+from .openrouter import OpenRouterClient
 
 __all__ = [
-    "chunk", "discover", "embed", "factory", "figures", "ingest", "lint",
-    "llm", "parse", "profiles", "protocol", "registry", "render",
-    "retrieve", "store", "subjects", "tokens",
+    "chunk", "compress", "discover", "embed", "factory", "figures", "ingest",
+    "lint", "llm", "openrouter", "parse", "profiles", "protocol", "registry",
+    "render", "retrieve", "store", "subjects", "tokens",
+    "assemble_passages", "build_front_matter", "compress_body",
+    "compress_chapter", "estimate_tokens", "split_into_batches", "strip_fences",
+    "OpenRouterClient",
     "Chunk", "ChunkProfile", "chunk_markdown",
     "DiscoverReport", "discover_topics", "topic_title",
     "StubEmbedder", "TransformerEmbedder", "embed_text",
